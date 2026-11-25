@@ -1,0 +1,1 @@
+第10行 printf("%s %d\n", s->name, s->score); 里 s 是 struct Student 变量而不是指针，用 -> 取成员会报“s is not a pointer”，应改成 s.name 和 s.score。

@@ -1,0 +1,39 @@
+﻿文件,编译,运行,输出
+G003.c,编译通过,正常退出,"65
+  656565
+ 6565656565
+65656565656565"
+G003_correct.c,编译通过,正常退出,"A
+  ABC
+ ABCDE
+ABCDEFG"
+G003_practice.c,编译失败,-,
+G003_practice_correct.c,编译失败,-,
+R001.c,编译通过,正常退出,
+R003.c,编译通过,正常退出,0.000000
+R003_practice.c,编译通过,正常退出,0.000000
+R11080000.c,编译失败,-,
+c1.c,编译通过,正常退出,3
+c1_correct.c,编译通过,正常退出,7
+c1_practice.c,编译通过,正常退出,2
+c1_practice_correct.c,编译通过,正常退出,9
+c2.c,编译通过,正常退出,1 2
+c2_correct.c,编译通过,正常退出,2 1
+c2_practice.c,编译通过,正常退出,60
+c2_practice_correct.c,编译通过,正常退出,70
+c3.c,编译失败,-,
+c3_correct.c,编译通过,正常退出,3 4
+c3_practice.c,编译失败,-,
+c3_practice_correct.c,编译通过,正常退出,Tom 90
+c4.c,编译通过,正常退出,0
+c4_correct.c,编译通过,崩溃(1),鏂囦欢鎵撳紑澶辫触
+c4_practice.c,编译通过,正常退出,
+c4_practice_correct.c,编译通过,正常退出,
+c5.c,编译失败,-,
+c5_correct.c,编译通过,正常退出,7
+c5_practice.c,编译失败,-,
+c5_practice_correct.c,编译通过,正常退出,15
+c6.c,编译失败,-,
+c6_correct.c,编译通过,正常退出,7
+c6_practice.c,编译失败,-,
+c6_practice_correct.c,编译通过,正常退出,15
