@@ -2,6 +2,7 @@ import json
 import streamlit as st
 import re
 from validator import check
+from diagnose import DiagnosisError, api_key_configured, diagnose
 import csv
 from datetime import date
 import os
@@ -101,7 +102,49 @@ def parse(text):
 # 设置网页为宽屏显示模式
 st.set_page_config(layout="wide", page_title="错因诊断渲染器")
 
-st.title("🩺 AI 错因诊断解析工作台")
+st.title("🩺 AI 错因诊断工作台")
+
+st.caption("输入代码和报错可直接诊断；生成结果仍必须通过 11 段校验后才能保存。")
+
+st.session_state.setdefault("raw_text", "")
+
+with st.container(border=True):
+    st.subheader("⚡ 一键诊断")
+    if not api_key_configured():
+        st.warning("当前环境尚未配置 DeepSeek API Key。仍可使用下方的粘贴校验模式。")
+
+    with st.form("deepseek_diagnose_form"):
+        api_code = st.text_area(
+            "出错的 C 代码",
+            key="api_code",
+            height=260,
+            placeholder="#include <stdio.h>\n\nint main(void) {\n    ...\n}",
+        )
+        api_error = st.text_area(
+            "编译器报错或运行现象",
+            key="api_error",
+            height=110,
+            placeholder="例如：expected '}' at end of input",
+        )
+        diagnose_clicked = st.form_submit_button("开始诊断", type="primary")
+
+    if diagnose_clicked:
+        if not api_code.strip():
+            st.error("请先输入出错的 C 代码。")
+        else:
+            try:
+                with st.spinner("DeepSeek 正在诊断，请稍候……"):
+                    result = diagnose(api_code, api_error)
+                st.session_state["raw_text"] = result
+                st.session_state["diagnosis_source"] = "DeepSeek API"
+                st.rerun()
+            except DiagnosisError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error(f"诊断过程出现意外错误：{exc}")
+
+if st.session_state.get("diagnosis_source"):
+    st.info(f"最近一次结果来源：{st.session_state['diagnosis_source']}")
 
 # 将页面切成左右两栏
 col_left, col_right = st.columns([1, 1], gap="large")
@@ -112,16 +155,30 @@ with col_left:
     # 使用你截图中的真实 JSON 作为默认示例
     default_json = ""
 
-    raw_text = st.text_area("此粘贴【】格式文本：", value=default_json, height=400)
+    raw_text = st.text_area(
+        "粘贴或查看【】格式文本：",
+        key="raw_text",
+        height=400,
+    )
 
 with col_right:
     st.subheader("📖 诊断结果展示")
     if not raw_text.strip():
+        st.session_state["last"] = None
         st.info("请在左侧在此粘贴【】格式文本。")
     else:
+        st.session_state["last"] = None
         try:
             data = parse(raw_text)
-            st.session_state["last"] = data
+            valid, problems = check(raw_text)
+            st.session_state["last"] = data if valid else None
+
+            if not valid:
+                st.error("⚠️ 这条回答没有通过校验，不能入库：")
+                for problem in problems:
+                    st.write("- " + problem)
+            else:
+                st.success("✅ 11 段格式校验通过，可以保存")
 
             with st.container(border=True):
                 # 1. 错因类别 (高亮显示)

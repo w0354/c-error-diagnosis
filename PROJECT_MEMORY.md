@@ -1,0 +1,39 @@
+# 项目记忆
+
+## 当前状态
+
+- 项目：面向 C 语言初学者的错因诊断助手。
+- 本地原项目：`D:\python-learn\app`
+- 部署副本：`D:\python-learn\diagnosis_app`
+- GitHub：https://github.com/w0354/c-error-diagnosis
+- 公开演示：https://c-error-diagnosis-i7guwfzpdoqxbpmput6ngu.streamlit.app/
+
+## 已完成的稳定能力
+
+- 固定 11 段诊断格式，规则保存在 `prompt_v6.txt`。
+- 15 类错因和 K01–K15 知识点体系。
+- Streamlit 解析、校验、代码归档、复习列表和质量看板。
+- GitHub 和 Streamlit Community Cloud 发布链路。
+- 已恢复 36 条记录及其代码关联。
+
+## 当前阶段目标
+
+使用 DeepSeek `deepseek-chat` 接入一键诊断：
+
+```text
+输入代码和报错 -> DeepSeek API -> 11 段回答
+-> 解析 -> 校验 -> 页面展示 -> 合格后保存
+```
+
+## 数据安全
+
+- 原始数据恢复包：`D:\python-learn\diagnosis_data_recovery_20261125`
+- DeepSeek Key 只保存在 `.streamlit/secrets.toml`，不得提交。
+- Streamlit Community Cloud 本地文件不能作为长期数据库。
+
+## 尚未完成
+
+- 云端配置 DeepSeek Secret。
+- 接入持久化数据库。
+- 第一位真实用户测试。
+- 记忆注入 A/B 对照实验。
