@@ -108,7 +108,12 @@ st.caption("输入代码和报错可直接诊断；生成结果仍必须通过 1
 
 st.session_state.setdefault("raw_text", "")
 st.session_state.setdefault("api_call_count", 0)
-MAX_API_CALLS_PER_SESSION = 10
+try:
+    MAX_API_CALLS_PER_SESSION = max(
+        0, int(st.secrets.get("MAX_API_CALLS_PER_SESSION", 100))
+    )
+except (TypeError, ValueError):
+    MAX_API_CALLS_PER_SESSION = 100
 
 with st.container(border=True):
     st.subheader("⚡ 一键诊断")
@@ -133,7 +138,10 @@ with st.container(border=True):
     if diagnose_clicked:
         if not api_code.strip():
             st.error("请先输入出错的 C 代码。")
-        elif st.session_state["api_call_count"] >= MAX_API_CALLS_PER_SESSION:
+        elif (
+            MAX_API_CALLS_PER_SESSION > 0
+            and st.session_state["api_call_count"] >= MAX_API_CALLS_PER_SESSION
+        ):
             st.error("本次会话的诊断次数已用完，请刷新页面后继续，或稍后再试。")
         else:
             try:
@@ -153,10 +161,12 @@ with st.container(border=True):
 if st.session_state.get("diagnosis_source"):
     st.info(f"最近一次结果来源：{st.session_state['diagnosis_source']}")
 
-st.caption(
-    f"费用保护：当前浏览器会话还可调用 "
-    f"{max(0, MAX_API_CALLS_PER_SESSION - st.session_state['api_call_count'])} 次。"
-)
+if MAX_API_CALLS_PER_SESSION > 0:
+    remaining = max(
+        0, MAX_API_CALLS_PER_SESSION - st.session_state["api_call_count"]
+    )
+    if remaining <= 10:
+        st.warning(f"当前浏览器会话仅剩 {remaining} 次诊断。")
 
 # 将页面切成左右两栏
 col_left, col_right = st.columns([1, 1], gap="large")
