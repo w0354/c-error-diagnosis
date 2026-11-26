@@ -48,6 +48,19 @@ SUPABASE_URL = "你的 Supabase Project URL"
 SUPABASE_SERVICE_ROLE_KEY = "你的 Secret key"
 ```
 
+## 质量审计
+
+本地编译审计会读取 Supabase 中的 R004–R010，分别检查原题正确代码、
+同类题代码和同类题正确代码，并生成 `quality_audit.csv`：
+
+```powershell
+python quality_audit.py
+```
+
+脚本优先使用环境变量 `C_COMPILER`，否则尝试系统 `gcc`，再回退到
+Dev-C++ 的 MinGW 编译器。逻辑类错误的同类题应能编译但运行结果错误；
+若同类题产生额外编译错误，会被标记为不合格。
+
 ## V2 界面预览
 
 公开入口暂时仍是 `app.py`。新版界面在完成验收前通过以下命令本地预览：
