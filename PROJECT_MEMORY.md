@@ -11,7 +11,7 @@
 ## 已完成的稳定能力
 
 - 固定 11 段诊断格式，规则保存在 `prompt_v6.txt`。
-- 15 类错因和 K01–K15 知识点体系。
+- 15 类错因和 K01–K15 知识点体系，权威表保存在 `knowledge_map.md`。
 - Streamlit 解析、校验、代码归档、复习列表和质量看板。
 - GitHub 和 Streamlit Community Cloud 发布链路。
 - 已恢复 36 条记录及其代码关联。

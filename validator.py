@@ -12,6 +12,24 @@ FIELDS = ["原文核对", "错因类别", "判断依据", "知识点",
 
 SPECIAL_CATS = {"无错误", "需题目", "表外-待确认"}
 
+KNOWLEDGE = {
+    "K01": "程序结构与预处理",
+    "K02": "变量定义与声明",
+    "K03": "数据类型与转换",
+    "K04": "运算符与表达式",
+    "K05": "输入输出",
+    "K06": "选择结构",
+    "K07": "循环结构",
+    "K08": "一维/二维数组",
+    "K09": "字符数组与字符串",
+    "K10": "函数与参数传递",
+    "K11": "变量初始化与作用域",
+    "K12": "指针基础",
+    "K13": "指针与数组、字符串",
+    "K14": "结构体、共用体、链表、枚举",
+    "K15": "文件操作",
+}
+
 
 def parse(text):
     parts = re.split(r'【(.*?)】', text)
@@ -29,10 +47,12 @@ def check(text):
     if cat not in CATS and cat not in SPECIAL_CATS:
         problems.append("错因类别不在 15 类里")
     kp = d.get("知识点", "").strip()
-    if cat not in SPECIAL_CATS and not re.fullmatch(
-        r"K(?:0[1-9]|1[0-5])｜[^\n]+", kp
-    ):
-        problems.append("知识点不是 K01–K15")
+    if cat not in SPECIAL_CATS:
+        match = re.fullmatch(r"(K(?:0[1-9]|1[0-5]))｜([^\n]+)", kp)
+        if not match:
+            problems.append("知识点不是 K01–K15")
+        elif match.group(2).strip() != KNOWLEDGE[match.group(1)]:
+            problems.append("知识点名称与编号不匹配")
     if cat not in SPECIAL_CATS and "main" not in d.get("同类题代码", ""):
         problems.append("同类题不是完整程序")
     if cat not in SPECIAL_CATS and "main" not in d.get("同类题正确代码", ""):
