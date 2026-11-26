@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import html
 import os
 import re
 import shutil
@@ -242,9 +243,40 @@ def render_result(raw_text: str) -> tuple[dict | None, bool, list[str]]:
 
     st.subheader("诊断结果")
     col1, col2, col3 = st.columns(3)
-    col1.metric("错因类别", result["错因类别"] or "未识别")
-    col2.metric("知识点", result["知识点"] or "未识别")
-    col3.metric("格式校验", "通过" if valid else "未通过")
+
+    def summary_card(column, label: str, value: str, emphasized: bool = False) -> None:
+        label_text = html.escape(label)
+        value_text = html.escape(value or "未识别")
+        value_size = "1.02rem" if emphasized else "0.95rem"
+        column.markdown(
+            f"""
+            <div style="
+                border: 1px solid rgba(128,128,128,.28);
+                border-radius: 10px;
+                padding: 12px 14px;
+                min-height: 82px;
+                background: rgba(128,128,128,.04);
+            ">
+                <div style="font-size: .78rem; opacity: .72; margin-bottom: 6px;">
+                    {label_text}
+                </div>
+                <div style="
+                    font-size: {value_size};
+                    line-height: 1.4;
+                    font-weight: 600;
+                    white-space: normal;
+                    overflow-wrap: anywhere;
+                ">
+                    {value_text}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    summary_card(col1, "错因类别", result["错因类别"], emphasized=True)
+    summary_card(col2, "知识点", result["知识点"])
+    summary_card(col3, "格式校验", "通过" if valid else "未通过", emphasized=True)
 
     if valid:
         st.success("11 段格式校验通过。")
