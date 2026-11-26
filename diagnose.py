@@ -81,12 +81,22 @@ def _build_messages(
     problem: str,
     history: str,
 ) -> list[dict[str, str]]:
+    code_lines = code.splitlines()
+    line_width = max(2, len(str(len(code_lines))))
+    numbered_code = "\n".join(
+        f"{number:>{line_width}} | {line}"
+        for number, line in enumerate(code_lines, start=1)
+    )
     user_parts = [
         "请严格按系统提示中的固定 11 段格式诊断下面的代码。",
         "",
-        "<<<学生代码开始>>>",
-        code.strip(),
-        "<<<学生代码结束>>>",
+        "以下代码前面的数字是行号，仅用于准确定位。",
+        "引用行号时必须以此编号为准，不得自行重新数行。",
+        "<<<带行号的学生代码开始>>>",
+        numbered_code,
+        "<<<带行号的学生代码结束>>>",
+        "【原文核对】仍按系统要求写原代码前三行，不要在原文核对中保留行号；",
+        "【同类题代码】【同类题正确代码】【正确代码】中也不得保留行号。",
         "",
         "<<<编译器报错或运行现象开始>>>",
         compiler_error.strip() or "未提供编译器报错。",
