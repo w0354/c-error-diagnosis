@@ -29,6 +29,17 @@ DeepSeek API Key。该文件已加入 `.gitignore`，不得提交。
 - 接口地址：`https://api.deepseek.com`
 - 系统提示词：`prompt_v6.txt`
 
+## V2 界面预览
+
+公开入口暂时仍是 `app.py`。新版界面在完成验收前通过以下命令本地预览：
+
+```powershell
+streamlit run app_v2.py
+```
+
+V2 将页面拆分为“一键诊断”“错题库与复习”“项目质量”三个标签页，
+诊断、知识分类和保存逻辑继续复用原有模块。
+
 ## 当前限制
 
 - API 回答仍需通过 11 段格式校验，不合格时禁止保存。

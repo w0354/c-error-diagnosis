@@ -15,6 +15,9 @@
 - Streamlit 解析、校验、代码归档、复习列表和质量看板。
 - GitHub 和 Streamlit Community Cloud 发布链路。
 - 已恢复 36 条记录及其代码关联。
+- UI V2 使用 `app_v2.py` 预览，稳定入口仍为 `app.py`。
+- 改版前备份：`D:\python-learn\diagnosis_app_backups`
+- Git 回退标签：`working-diagnosis-before-ui-20261126`
 
 ## 当前阶段目标
 
