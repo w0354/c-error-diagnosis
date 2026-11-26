@@ -274,6 +274,7 @@ def render_result(raw_text: str) -> tuple[dict | None, bool, list[str]]:
         st.error("这条回答不能入库。")
         for problem in problems:
             st.write("- " + problem)
+    st.caption("格式校验通过 ≠ 代码质量通过；保存前还要用 C 编译器验证同类题和正确代码。")
 
     with st.container(border=True):
         st.markdown("### 判断依据")
@@ -331,11 +332,16 @@ def render_save_form(result: dict, valid: bool) -> None:
             placeholder="可选；会与代码、诊断结果一起保存到 Supabase。",
         )
         confirmed = st.checkbox("确认保存这一条")
+        quality_confirmed = st.checkbox(
+            "我已用 C 编译器验证：同类题能复现预期问题，正确代码能编译运行"
+        )
         submitted = st.form_submit_button("保存记录")
 
     if submitted:
         st.session_state["save_notice"] = ""
-        if not confirmed:
+        if not quality_confirmed:
+            st.error("请先用编译器验证同类题和正确代码，再勾选质量确认。")
+        elif not confirmed:
             st.error("请先勾选“确认保存这一条”。")
         elif not code_id.strip():
             st.error("请填写记录编号。")
