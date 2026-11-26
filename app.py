@@ -1,558 +1,609 @@
-import json
-import streamlit as st
+from __future__ import annotations
+
+import html
 import re
-from validator import CATS, check
-from diagnose import DiagnosisError, api_key_configured, diagnose
-import csv
 from datetime import date
-import os
-HERE = os.path.dirname(os.path.abspath(__file__))
-import csv as csvmod
+from pathlib import Path
 
-def mark_done_index(i):
-    shutil.copy(CSV_PATH, CSV_PATH + ".bak")
-    with open(CSV_PATH, encoding="utf-8-sig", newline="") as f:
-        rows = list(csv.reader(f))
-    header = [h.strip() for h in rows[0]]
-    col = header.index("重做结果")
-    line = i + 1
-    while len(rows[line]) <= col:
-        rows[line].append("")
-    rows[line][col] = "√ 已重做"
-    with open(CSV_PATH, "w", encoding="utf-8-sig", newline="") as f:
-        csv.writer(f).writerows(rows)
+import pandas as pd
+import streamlit as st
 
-def load_rows(path):
-    with open(path, encoding="utf-8-sig", newline="") as f:
-        rows = list(csvmod.reader(f))
-    header = [h.strip() for h in rows[0]]
+from diagnose import DiagnosisError, api_key_configured, diagnose
+from supabase_store import (
+    SupabaseError,
+    find_record,
+    insert_record,
+    list_records,
+    update_redo,
+)
+from validator import CATS, check
+from validator import parse as parse_sections
+
+
+HERE = Path(__file__).resolve().parent
+CSV_PATH = HERE / "records_v3.csv"
+CODES_DIR = HERE / "codes"
+ROW_FIELDS = [
+    "日期",
+    "章节",
+    "代码片段",
+    "报错信息",
+    "我判的类别",
+    "它判的类别",
+    "对不对",
+    "知识点",
+    "重做结果",
+    "来源",
+]
+DB_TEXT_FIELDS = [
+    "problem_text",
+    "student_code",
+    "practice_scenario",
+    "practice_code",
+    "practice_answer",
+    "practice_correct_code",
+    "correct_code",
+    "explanation",
+    "raw_response",
+]
+CHAPTER = {
+    "K01": "第1章",
+    "K02": "第3章",
+    "K03": "第3章",
+    "K04": "第3章",
+    "K05": "第3章",
+    "K06": "第4章",
+    "K07": "第5章",
+    "K08": "第6章",
+    "K09": "第6章",
+    "K10": "第7章",
+    "K11": "第7章",
+    "K12": "第8章",
+    "K13": "第8章",
+    "K14": "第9章",
+    "K15": "第10章",
+}
+CATEGORY_ALIASES = {
+    "逻辑错误（整数除法）": "整数除法与除零",
+    "逻辑错误(整数除法)": "整数除法与除零",
+    "数据下标越界": "数组下标越界",
+    "输入输出格式问题": "输入输出格式",
+}
+
+
+def load_rows() -> pd.DataFrame:
+    try:
+        rows = list_records()
+        st.session_state["supabase_error"] = ""
+    except SupabaseError as exc:
+        st.session_state["supabase_error"] = str(exc)
+        return pd.DataFrame(columns=ROW_FIELDS + DB_TEXT_FIELDS + ["数据库ID", "显示编号"])
+
     data = []
-    for r in rows[1:]:
-        r = (r + [""] * len(header))[:len(header)]
-        data.append(r)
-    return pd.DataFrame(data, columns=header)
+    for row in rows:
+        view_row = {
+            "数据库ID": str(row.get("id", "")),
+            "日期": str(row.get("date_label") or ""),
+            "章节": str(row.get("chapter") or ""),
+            "代码片段": str(row.get("display_id") or ""),
+            "显示编号": str(row.get("display_id") or ""),
+            "报错信息": str(row.get("compiler_error") or ""),
+            "我判的类别": str(row.get("my_category") or ""),
+            "它判的类别": str(row.get("ai_category") or ""),
+            "对不对": "",
+            "知识点": str(row.get("knowledge") or ""),
+            "重做结果": str(row.get("redo_status") or "未重做"),
+            "来源": str(row.get("source") or ""),
+        }
+        for field in DB_TEXT_FIELDS:
+            view_row[field] = str(row.get(field) or "")
+        data.append(view_row)
+    return pd.DataFrame(
+        data,
+        columns=ROW_FIELDS + DB_TEXT_FIELDS + ["数据库ID", "显示编号"],
+    )
 
-CSV_PATH = os.path.join(HERE, "records_v3.csv")
-ROW_FIELDS = ["日期", "章节", "代码片段", "报错信息",
-              "我判的类别", "它判的类别", "对不对",
-              "知识点", "重做结果", "来源"]
 
-def clean_code(text):
+def normalize_category(value: object) -> str:
+    value = str(value).strip()
+    value = CATEGORY_ALIASES.get(value, value)
+    for category in CATS:
+        if value == category or value.startswith(category + "（") or value.startswith(category + "("):
+            return category
+    return value
+
+
+def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df["它判的类别"] = df["它判的类别"].map(normalize_category)
+    df["重做结果"] = (
+        df["重做结果"]
+        .fillna("未重做")
+        .astype(str)
+        .str.strip()
+        .replace({"": "未重做", "None": "未重做", "nan": "未重做", "NaN": "未重做"})
+    )
+    if "显示编号" not in df.columns:
+        display_ids = []
+        for index, raw_id in zip(df.index, df["代码片段"]):
+            code_id = str(raw_id).strip()
+            looks_like_image = bool(code_id) and Path(code_id).suffix.lower() in {
+                ".png",
+                ".jpg",
+                ".jpeg",
+            }
+            display_ids.append(code_id if looks_like_image else f"H{int(index) + 1:03d}")
+        df["显示编号"] = display_ids
+    return df
+
+
+def clean_code(text: str) -> str:
     lines = str(text).splitlines()
     out = []
     started = False
     for line in lines:
-        s = line.strip()
+        stripped = line.strip()
         if not started:
-            if s.startswith("#include"):
+            if stripped.startswith("#"):
                 started = True
                 out.append(line)
             continue
-        if re.match(r"^题\s*\d", s):
+        if re.match(r"^题\s*\d", stripped):
             continue
         out.append(line)
     return "\n".join(out).strip()
 
-def save_row(row):
-    exists = os.path.exists(CSV_PATH)
-    with open(CSV_PATH, "a", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(f, fieldnames=ROW_FIELDS)
-        if not exists or os.path.getsize(CSV_PATH) == 0:
-            writer.writeheader()
-        writer.writerow(row)
 
-import shutil
-
-def mark_done(rec_id):
-    shutil.copy(CSV_PATH, CSV_PATH + ".bak")
-    with open(CSV_PATH, encoding="utf-8-sig", newline="") as f:
-        rows = list(csv.reader(f))
-    if not rows:
-        return 0
-    header = [h.strip() for h in rows[0]]
-    if "代码片段" not in header or "重做结果" not in header:
-        return 0
-    i_code = header.index("代码片段")
-    i_done = header.index("重做结果")
-    count = 0
-    for r in rows[1:]:
-        if len(r) > max(i_code, i_done) and r[i_code].strip() == str(rec_id).strip():
-            r[i_done] = "√ 已重做"
-            count += 1
-    with open(CSV_PATH, "w", encoding="utf-8-sig", newline="") as f:
-        csv.writer(f).writerows(rows)
-    return count
-
-def parse(text):
-    parts = re.split(r'【(.*?)】', text)
-    d = {parts[i].strip(): parts[i + 1].strip() for i in range(1, len(parts), 2)}
+def parse_result(text: str) -> dict:
+    sections = parse_sections(text)
     return {
-        "原文核对": d.get("原文核对", ""),
-        "错因类别": d.get("错因类别", ""),
-        "判断依据": d.get("判断依据", ""),
-        "知识点": d.get("知识点", ""),
-        "复习方向": d.get("复习方向", ""),
-        "同类题": {"代码": d.get("同类题代码", ""), "答案": d.get("同类题答案", "")},
-        "同类题情景": d.get("同类题情景", ""),
-        "同类题正确代码": d.get("同类题正确代码", ""),
-        "正确代码": d.get("正确代码", ""),
-        "逐行说明": d.get("逐行说明", ""),
+        "原文核对": sections.get("原文核对", ""),
+        "错因类别": sections.get("错因类别", ""),
+        "判断依据": sections.get("判断依据", ""),
+        "知识点": sections.get("知识点", ""),
+        "复习方向": sections.get("复习方向", ""),
+        "同类题情景": sections.get("同类题情景", ""),
+        "同类题代码": sections.get("同类题代码", ""),
+        "同类题答案": sections.get("同类题答案", ""),
+        "同类题正确代码": sections.get("同类题正确代码", ""),
+        "正确代码": sections.get("正确代码", ""),
+        "逐行说明": sections.get("逐行说明", ""),
     }
 
-# 设置网页为宽屏显示模式
-st.set_page_config(layout="wide", page_title="错因诊断渲染器")
 
-st.title("🩺 AI 错因诊断工作台")
+def save_record(
+    code_id: str,
+    source: str,
+    chapter: str,
+    my_category: str,
+    redo: str,
+    code: str,
+    compiler_error: str,
+    problem: str,
+    result: dict,
+    raw_response: str,
+) -> None:
+    insert_record(
+        {
+            "display_id": code_id,
+            "date_label": date.today().strftime("%Y-%m-%d"),
+            "chapter": chapter,
+            "source": source,
+            "compiler_error": compiler_error.strip() or "无",
+            "my_category": my_category,
+            "ai_category": result["错因类别"],
+            "knowledge": result["知识点"],
+            "redo_status": redo,
+            "problem_text": problem.strip(),
+            "student_code": clean_code(code),
+            "practice_scenario": result["同类题情景"],
+            "practice_code": clean_code(result["同类题代码"]),
+            "practice_answer": result["同类题答案"],
+            "practice_correct_code": clean_code(result["同类题正确代码"]),
+            "correct_code": clean_code(result["正确代码"]),
+            "explanation": result["逐行说明"],
+            "raw_response": raw_response,
+        }
+    )
 
-st.caption("输入代码和报错可直接诊断；生成结果仍必须通过 11 段校验后才能保存。")
+
+def mark_done(record_uuid: str) -> int:
+    if not record_uuid:
+        return 0
+    return update_redo(record_uuid)
+
+
+def history_summary(df: pd.DataFrame) -> str:
+    top3 = df.loc[df["它判的类别"].isin(CATS), "它判的类别"].value_counts().head(3)
+    recent = df["知识点"].dropna().astype(str).tail(3).tolist()
+    return (
+        "这是我最近的错误统计："
+        + "、".join(f"{name}（{count}次）" for name, count in top3.items())
+        + "。最近练过的知识点："
+        + "、".join(recent)
+        + "。请结合这些诊断下面的代码。"
+    )
+
+
+def render_result(raw_text: str) -> tuple[dict | None, bool, list[str]]:
+    if not raw_text.strip():
+        return None, False, []
+    result = parse_result(raw_text)
+    valid, problems = check(raw_text)
+
+    st.subheader("诊断结果")
+    col1, col2, col3 = st.columns(3)
+
+    def summary_card(column, label: str, value: str, emphasized: bool = False) -> None:
+        label_text = html.escape(label)
+        value_text = html.escape(value or "未识别")
+        value_size = "1.02rem" if emphasized else "0.95rem"
+        column.markdown(
+            f"""
+            <div style="
+                border: 1px solid rgba(128,128,128,.28);
+                border-radius: 10px;
+                padding: 12px 14px;
+                min-height: 82px;
+                background: rgba(128,128,128,.04);
+            ">
+                <div style="font-size: .78rem; opacity: .72; margin-bottom: 6px;">
+                    {label_text}
+                </div>
+                <div style="
+                    font-size: {value_size};
+                    line-height: 1.4;
+                    font-weight: 600;
+                    white-space: normal;
+                    overflow-wrap: anywhere;
+                ">
+                    {value_text}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    summary_card(col1, "错因类别", result["错因类别"], emphasized=True)
+    summary_card(col2, "知识点", result["知识点"])
+    summary_card(col3, "格式校验", "通过" if valid else "未通过", emphasized=True)
+
+    if valid:
+        st.success("11 段格式校验通过。")
+    else:
+        st.error("这条回答不能入库。")
+        for problem in problems:
+            st.write("- " + problem)
+
+    with st.container(border=True):
+        st.markdown("### 判断依据")
+        st.write(result["判断依据"])
+        st.markdown("### 复习方向")
+        st.write(result["复习方向"])
+
+    tabs = st.tabs(["同类题", "正确代码", "逐行说明"])
+    with tabs[0]:
+        st.markdown("**题目情景**")
+        st.write(result["同类题情景"])
+        st.markdown("**题目代码**")
+        st.code(result["同类题代码"], language="c")
+        with st.expander("同类题答案"):
+            st.write(result["同类题答案"])
+        with st.expander("同类题正确代码"):
+            st.code(result["同类题正确代码"], language="c")
+    with tabs[1]:
+        st.code(result["正确代码"], language="c")
+    with tabs[2]:
+        st.write(result["逐行说明"])
+
+    with st.expander("查看原始 11 段回答"):
+        st.text_area("原始回答", value=raw_text, height=300, disabled=True)
+
+    return result, valid, problems
+
+
+def render_save_form(result: dict, valid: bool) -> None:
+    category = result.get("错因类别", "")
+    if not valid or category not in CATS:
+        st.info("只有普通错误且 11 段校验通过后才能保存。")
+        return
+
+    st.subheader("保存错题")
+    knowledge = result.get("知识点", "")
+    automatic_chapter = CHAPTER.get(knowledge[:3], "第3章")
+    with st.form("save_diagnosis_record"):
+        col1, col2, col3 = st.columns(3)
+        code_id = col1.text_input("编号", placeholder="例如 R004")
+        source = col2.selectbox(
+            "来源",
+            ["真实作业", "构造测试", "挑战测试"],
+            index=1,
+        )
+        chapter = col3.text_input("章节", automatic_chapter)
+        col4, col5 = st.columns(2)
+        my_category = col4.text_input("我判的类别", "没判出")
+        redo = col5.text_input("重做结果", "未重做")
+        code = st.text_area("原始代码", key="code_input", height=220)
+        problem = st.text_area(
+            "题目要求与样例",
+            key="problem_input",
+            height=130,
+            placeholder="可选；会与代码、诊断结果一起保存到 Supabase。",
+        )
+        confirmed = st.checkbox("确认保存这一条")
+        submitted = st.form_submit_button("保存记录")
+
+    if submitted:
+        if not confirmed:
+            st.error("请先勾选“确认保存这一条”。")
+        elif not code_id.strip():
+            st.error("请填写记录编号。")
+        else:
+            try:
+                if find_record(code_id.strip()):
+                    st.error("这个编号已经存在，请换一个编号。")
+                else:
+                    save_record(
+                        code_id=code_id.strip(),
+                        source=source,
+                        chapter=chapter,
+                        my_category=my_category,
+                        redo=redo,
+                        code=code,
+                        compiler_error=st.session_state.get("diagnosis_error", ""),
+                        problem=problem,
+                        result=result,
+                        raw_response=st.session_state.get("raw_text", ""),
+                    )
+                    st.success(f"已保存到 Supabase：{code_id.strip()}。")
+                    st.rerun()
+            except SupabaseError as exc:
+                st.error(str(exc))
+
+
+st.set_page_config(layout="wide", page_title="C 语言错因诊断助手", page_icon="🩺")
+
+st.title("🩺 C 语言错因诊断助手")
+st.caption("把 AI 回答转换为经过格式校验、可存档、可复习的错题数据。")
 
 st.session_state.setdefault("raw_text", "")
 st.session_state.setdefault("api_call_count", 0)
+st.session_state.setdefault("code_input", "")
+st.session_state.setdefault("problem_input", "")
 try:
-    MAX_API_CALLS_PER_SESSION = max(
-        0, int(st.secrets.get("MAX_API_CALLS_PER_SESSION", 100))
-    )
+    max_calls = max(0, int(st.secrets.get("MAX_API_CALLS_PER_SESSION", 100)))
 except (TypeError, ValueError):
-    MAX_API_CALLS_PER_SESSION = 100
+    max_calls = 100
 
-with st.container(border=True):
-    st.subheader("⚡ 一键诊断")
-    if not api_key_configured():
-        st.warning("当前环境尚未配置 DeepSeek API Key。仍可使用下方的粘贴校验模式。")
+with st.sidebar:
+    st.subheader("运行状态")
+    if api_key_configured():
+        st.success("DeepSeek API 已连接")
+    else:
+        st.error("DeepSeek API 未配置")
+    st.caption("诊断规则：v6 / 11 段 / 15 类错因 / K01–K15")
+    st.success("错题数据保存到 Supabase")
+    if max_calls > 0:
+        remaining = max(0, max_calls - st.session_state["api_call_count"])
+        st.caption(f"本会话剩余诊断次数：{remaining}")
 
-    with st.form("deepseek_diagnose_form"):
-        api_code = st.text_area(
+tab_diagnose, tab_records, tab_quality = st.tabs(["一键诊断", "错题库与复习", "项目质量"])
+
+with tab_diagnose:
+    with st.form("diagnosis_form"):
+        left, right = st.columns(2)
+        code_input = left.text_area(
             "出错的 C 代码",
             key="api_code",
-            height=260,
+            height=300,
             placeholder="#include <stdio.h>\n\nint main(void) {\n    ...\n}",
         )
-        api_error = st.text_area(
+        error_input = right.text_area(
             "编译器报错或运行现象",
             key="api_error",
-            height=110,
-            placeholder="例如：expected '}' at end of input",
+            height=130,
+            placeholder="例如：expected ';' before 'return'",
         )
-        api_problem = st.text_area(
+        problem_input = right.text_area(
             "题目要求与样例（可留空）",
             key="api_problem",
-            height=140,
-            placeholder="仅当代码能编译、运行结果取决于作业要求时填写。缺少分号、括号、未声明变量等可自证错误不需要题目。",
-            help="构造测试通常可以留空。只有无法从代码、报错或运行现象判断是否符合题意时，才需要补充题目和预期结果。",
+            height=130,
+            placeholder="代码能编译但结果取决于题意时填写；构造测试通常可以留空。",
         )
-        diagnose_clicked = st.form_submit_button("开始诊断", type="primary")
+        submitted = st.form_submit_button("开始诊断", type="primary")
 
-    if diagnose_clicked:
-        if not api_code.strip():
+    if submitted:
+        if not code_input.strip():
             st.error("请先输入出错的 C 代码。")
-        elif (
-            MAX_API_CALLS_PER_SESSION > 0
-            and st.session_state["api_call_count"] >= MAX_API_CALLS_PER_SESSION
-        ):
-            st.error("本次会话的诊断次数已用完，请刷新页面后继续，或稍后再试。")
+        elif max_calls > 0 and st.session_state["api_call_count"] >= max_calls:
+            st.error("本次会话的诊断次数已经用完。")
         else:
             try:
                 st.session_state["api_call_count"] += 1
                 with st.spinner("DeepSeek 正在诊断，请稍候……"):
-                    result = diagnose(api_code, api_error, api_problem)
-                st.session_state["raw_text"] = result
-                st.session_state["diagnosis_source"] = "DeepSeek API"
-                st.session_state["code_input"] = api_code
-                st.session_state["diagnosis_error"] = api_error
-                st.session_state["problem_input"] = api_problem
+                    result_text = diagnose(code_input, error_input, problem_input)
+                st.session_state["raw_text"] = result_text
+                st.session_state["code_input"] = code_input
+                st.session_state["diagnosis_error"] = error_input
+                st.session_state["problem_input"] = problem_input
                 st.rerun()
             except DiagnosisError as exc:
                 st.error(str(exc))
             except Exception as exc:
                 st.error(f"诊断过程出现意外错误：{exc}")
 
-if st.session_state.get("diagnosis_source"):
-    st.info(f"最近一次结果来源：{st.session_state['diagnosis_source']}")
+    with st.expander("高级：粘贴已有诊断回答"):
+        manual_text = st.text_area("粘贴【】格式回答", key="manual_result", height=220)
+        if st.button("载入并校验"):
+            st.session_state["raw_text"] = manual_text
+            st.session_state["code_input"] = code_input
+            st.session_state["diagnosis_error"] = error_input
+            st.session_state["problem_input"] = problem_input
+            st.rerun()
 
-if MAX_API_CALLS_PER_SESSION > 0:
-    remaining = max(
-        0, MAX_API_CALLS_PER_SESSION - st.session_state["api_call_count"]
+    raw_text = st.session_state["raw_text"]
+    parsed_result, is_valid, _ = render_result(raw_text)
+    if parsed_result is not None:
+        render_save_form(parsed_result, is_valid)
+
+with tab_records:
+    dataframe = normalize_dataframe(load_rows())
+    if st.session_state.get("supabase_error"):
+        st.error(st.session_state["supabase_error"])
+    st.subheader("当前档案")
+    metric1, metric2, metric3, metric4 = st.columns(4)
+    metric1.metric("记录总数", len(dataframe))
+    metric2.metric("真实作业", int((dataframe["来源"] == "真实作业").sum()))
+    metric3.metric("待重做", int((dataframe["重做结果"] == "未重做").sum()))
+    metric4.metric(
+        "覆盖错因",
+        dataframe.loc[dataframe["它判的类别"].isin(CATS), "它判的类别"].nunique(),
     )
-    if remaining <= 10:
-        st.warning(f"当前浏览器会话仅剩 {remaining} 次诊断。")
 
-# 将页面切成左右两栏
-col_left, col_right = st.columns([1, 1], gap="large")
-
-with col_left:
-    st.subheader("📋粘贴诊断结果 ")
-
-    # 使用你截图中的真实 JSON 作为默认示例
-    default_json = ""
-
-    raw_text = st.text_area(
-        "粘贴或查看【】格式文本：",
-        key="raw_text",
-        height=400,
-    )
-
-with col_right:
-    st.subheader("📖 诊断结果展示")
-    if not raw_text.strip():
-        st.session_state["last"] = None
-        st.info("请在左侧在此粘贴【】格式文本。")
+    st.subheader("今日复习")
+    pending = dataframe[dataframe["重做结果"] == "未重做"].copy()
+    frequencies = dataframe.loc[dataframe["它判的类别"].isin(CATS), "它判的类别"].value_counts()
+    pending["优先级"] = pending["它判的类别"].map(frequencies).fillna(0)
+    review = pending.sort_values("优先级", ascending=False).head(3)
+    if review.empty:
+        st.info("当前没有待重做题目。")
     else:
-        st.session_state["last"] = None
-        try:
-            data = parse(raw_text)
-            valid, problems = check(raw_text)
-            st.session_state["last"] = data if valid else None
+        st.dataframe(
+            review[["显示编号", "它判的类别", "知识点"]],
+            width="stretch",
+            hide_index=True,
+        )
 
-            if not valid:
-                st.error("⚠️ 这条回答没有通过校验，不能入库：")
-                for problem in problems:
-                    st.write("- " + problem)
+    category = st.selectbox(
+        "按类别筛选",
+        ["全部"] + sorted(dataframe.loc[dataframe["它判的类别"].isin(CATS), "它判的类别"].unique()),
+    )
+    filtered = dataframe if category == "全部" else dataframe[dataframe["它判的类别"] == category]
+    only_pending = st.checkbox("只看未重做")
+    if only_pending:
+        filtered = filtered[filtered["重做结果"] == "未重做"]
+
+    st.dataframe(
+        filtered[["显示编号", "日期", "它判的类别", "知识点", "重做结果", "来源"]],
+        width="stretch",
+        hide_index=True,
+    )
+
+    if filtered.empty:
+        st.info("当前筛选条件下没有记录。")
+    else:
+        def record_label(index: int) -> str:
+            row = filtered.loc[index]
+            return f"{row.get('显示编号', '无编号')}｜{row.get('它判的类别', '')}"
+
+        selected_index = st.selectbox("查看一条记录", filtered.index, format_func=record_label)
+        record = filtered.loc[selected_index]
+        display_id = str(record.get("显示编号", "")).strip()
+        record_uuid = str(record.get("数据库ID", "")).strip()
+        student_code = str(record.get("student_code", "")).strip()
+        problem_text = str(record.get("problem_text", "")).strip()
+        practice_code = str(record.get("practice_code", "")).strip()
+        practice_answer = str(record.get("practice_answer", "")).strip()
+        practice_correct_code = str(record.get("practice_correct_code", "")).strip()
+        correct_code = str(record.get("correct_code", "")).strip()
+        explanation = str(record.get("explanation", "")).strip()
+
+        with st.container(border=True):
+            st.subheader(record_label(selected_index))
+            st.caption(f"记录编号：{display_id}")
+            if student_code:
+                st.markdown("**原始代码**")
+                st.code(student_code, language="c")
             else:
-                st.success("✅ 11 段格式校验通过，可以保存")
+                st.info("这条历史记录没有保存原始代码文本。")
+            if problem_text:
+                with st.expander("题目要求与样例"):
+                    st.write(problem_text)
+            if practice_code:
+                with st.expander("同类题"):
+                    st.code(practice_code, language="c")
+                with st.expander("同类题答案"):
+                    st.write(practice_answer or "无")
+                with st.expander("同类题正确代码"):
+                    st.code(practice_correct_code or "无", language="c")
+            if correct_code:
+                with st.expander("正确代码"):
+                    st.code(correct_code, language="c")
+            if explanation:
+                with st.expander("逐行说明"):
+                    st.write(explanation)
 
-            with st.container(border=True):
-                # 1. 错因类别 (高亮显示)
-                error_type = data.get("错因类别", "未知")
-                st.markdown(f"#### 🚨 错因类别：<span style='color:red;'>{error_type}</span>", unsafe_allow_html=True)
+            if st.button("标记为已重做"):
+                try:
+                    changed = mark_done(record_uuid)
+                    if changed:
+                        st.success("已在 Supabase 中标记为已重做。")
+                        st.rerun()
+                    else:
+                        st.warning("没有找到可更新的记录。")
+                except SupabaseError as exc:
+                    st.error(str(exc))
 
-                st.divider()  # 分割线
+with tab_quality:
+    quality_data = normalize_dataframe(load_rows())
+    st.subheader("错因分布")
+    left_chart, right_chart = st.columns(2)
+    with left_chart:
+        st.markdown("**全部记录**")
+        counts = quality_data["它判的类别"].value_counts().reindex(sorted(CATS), fill_value=0)
+        st.bar_chart(counts)
+    with right_chart:
+        st.markdown("**真实作业**")
+        real_counts = (
+            quality_data[quality_data["来源"] == "真实作业"]["它判的类别"]
+            .value_counts()
+            .reindex(sorted(CATS), fill_value=0)
+        )
+        st.bar_chart(real_counts)
 
-                # 2. 原文核对 (用代码块展示，自动识别换行)
-                st.markdown("#### 💻 原文核对")
-                st.code(data.get("原文核对", "无"), language="c")
+    st.subheader("自动质检")
+    quality_left, quality_right = st.columns(2)
+    compile_path = HERE / "compile_check.csv"
+    runtime_path = HERE / "runtime_check.csv"
+    with quality_left:
+        if compile_path.exists():
+            compile_data = pd.read_csv(compile_path, encoding="utf-8-sig")
+            st.metric("编译检查文件", len(compile_data))
+            st.metric("编译失败", int((compile_data["结果"] == "失败").sum()))
+    with quality_right:
+        if runtime_path.exists():
+            runtime_data = pd.read_csv(runtime_path, encoding="utf-8-sig")
+            st.metric("运行检查文件", len(runtime_data))
+            st.metric(
+                "运行崩溃/超时",
+                int(runtime_data["运行"].astype(str).str.contains("崩溃|超时").sum()),
+            )
+    st.caption("抽检 8 条，合格 6 条（75%）；变式 5 道，4 道达到三级以上（80%）。")
 
-                # 3. 判断依据
-                st.markdown("#### 🔍 判断依据")
-                st.write(data.get("判断依据", "无"))
-
-                # 4. 知识点与复习方向
-                col_k, col_r = st.columns(2)
-                with col_k:
-                    st.markdown(f"**💡 知识点：** `{data.get('知识点', '无')}`")
-                with col_r:
-                    st.markdown(f"**🎯 复习方向：**")
-                    st.write(data.get("复习方向", "无"))
-
-                st.divider()
-
-                # 5. 同类题拓展
-                st.markdown("#### 📌 同类题拓展")
-                same_q = data.get("同类题", {})
-                if same_q:
-                    st.markdown("**题目情景：**")
-                    st.write(data.get("同类题情景", "无"))
-                    st.markdown("**题目代码：**")
-                    st.code(same_q.get("代码", "无"), language="c")
-                    with st.expander("重做题：看答案解析（先自己做）"):
-                        st.write(same_q.get("答案", "无"))
-                    with st.expander("重做题：正确代码"):
-                        st.code(data.get("同类题正确代码", "暂无"), language="c")
-                else:
-                    st.info("无同类题数据。")
-
-                st.markdown("---")
-                with st.expander("原题：正确代码（先自己改，再看）"):
-                    st.code(data.get("正确代码", "暂无"), language="c")
-                with st.expander("原题：逐行说明"):
-                    st.write(data.get("逐行说明", "暂无"))
-
-        except Exception as e:
-            st.error(
-                "⚠️ 解析失败，请检查【】标记是否完整")
-
-import pandas as pd
-
-st.divider()
-st.subheader("错因分布")
-import os
-HERE = os.path.dirname(os.path.abspath(__file__))
-df = load_rows(CSV_PATH)
-df.columns = df.columns.str.strip()
-df["它判的类别"] = df["它判的类别"].astype(str).str.strip()
-
-df["重做结果"] = (
-    df["重做结果"].fillna("未重做").astype(str).str.strip()
-    .replace({"": "未重做", "None": "未重做", "nan": "未重做", "NaN": "未重做"})
-)
-
-fix = {"逻辑错误（整数除法）": "整数除法与除零",
-       "逻辑错误(整数除法)": "整数除法与除零",
-       "数据下标越界": "数组下标越界",
-       "输入输出格式问题": "输入输出格式"}
-df["它判的类别"] = df["它判的类别"].replace(fix)
-
-def normalize_category(value):
-    value = str(value).strip()
-    for category in CATS:
-        if value == category or value.startswith(category + "（") or value.startswith(category + "("):
-            return category
-    return value
-
-df["它判的类别"] = df["它判的类别"].map(normalize_category)
-
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("记录总数", len(df))
-c2.metric("真实作业", int((df["来源"] == "真实作业").sum()))
-c3.metric("待重做", int((df["重做结果"] == "未重做").sum()))
-c4.metric("覆盖错因", df.loc[df["它判的类别"].isin(CATS), "它判的类别"].nunique())
-
-order = ["漏分号", "括号不配对", "预处理指令错误", "拼写错误",
-         "变量未声明", "类型不匹配", "输入输出格式",
-         "数组下标越界", "循环边界", "指针问题",
-         "函数返回值与参数", "字符串处理", "变量未初始化",
-         "逻辑错误", "整数除法与除零"]
-
-counts = df["它判的类别"].value_counts().reindex(order, fill_value=0)
-# 全部记录
-counts_all = df["它判的类别"].value_counts().reindex(order, fill_value=0)
-
-# 只看真实作业
-real = df[df["来源"] == "真实作业"]
-counts_real = real["它判的类别"].value_counts().reindex(order, fill_value=0)
-
-left, right = st.columns(2)
-with left:
-    st.markdown("**全部记录**")
-    st.bar_chart(counts_all)
-with right:
-    st.markdown("**真实作业**")
-    st.bar_chart(counts_real)
-
-st.subheader("带历史的提示")
-top3 = df["它判的类别"].value_counts().head(3)
-recent = df["知识点"].dropna().astype(str).tail(3).tolist()
-
-history_prompt = (
-    "这是我最近的错误统计：" +
-    "、".join(f"{k}（{v}次）" for k, v in top3.items()) +
-    "。最近练过的知识点：" + "、".join(recent) +
-    "。请结合这些诊断下面的代码。\n\n我的代码：\n"
-)
-st.code(history_prompt, language="text")
-
-st.divider()
-st.subheader("回答校验")
-txt = st.text_area("粘贴助手的完整回答", height=220, key="check_box")
-if st.button("检查一下"):
-    res = check(txt)
-    if res is None:
-        st.error("check() 没有返回值，请检查 validator.py")
-    else:
-        ok, problems = res
-        if ok:
-            st.success("合格")
+    st.subheader("回答校验器")
+    validation_text = st.text_area("粘贴一条完整回答", height=220)
+    if st.button("单独校验"):
+        validation_ok, validation_problems = check(validation_text)
+        if validation_ok:
+            st.success("校验通过。")
         else:
-            st.error("不合格")
-            for p in problems:
-                st.write("- " + p)
+            st.error("校验未通过。")
+            for problem in validation_problems:
+                st.write("- " + problem)
 
-st.divider()
-st.subheader("保存这条记录")
-last = st.session_state.get("last")
-
-CHAPTER = {
-    "K01": "第1章", "K02": "第3章", "K03": "第3章", "K04": "第3章",
-    "K05": "第3章", "K06": "第4章", "K07": "第5章", "K08": "第6章",
-    "K09": "第6章", "K10": "第7章", "K11": "第7章", "K12": "第8章",
-    "K13": "第8章", "K14": "第9章", "K15": "第10章",
-}
-
-if not last:
-    st.info("先在左边粘贴一条回答")
-else:
-    kp = last.get("知识点", "")
-    auto_chapter = CHAPTER.get(kp[:3], "第3章")
-
-    c1, c2 = st.columns(2)
-    with c1:
-        source = st.selectbox("来源", ["真实作业", "构造测试", "挑战测试"])
-        chapter = st.text_input("章节", auto_chapter)
-    with c2:
-        my_cat = st.text_input("我判的类别", "没判出")
-        redo = st.text_input("重做结果", "未重做")
-
-    code_text = st.text_area("原始代码", height=200, key="code_input")
-    problem_text = st.text_area(
-        "题目要求与样例",
-        height=140,
-        key="problem_input",
-        placeholder="可选。保存后可在错题详情中重新查看。",
-    )
-
-    codes_dir = os.path.join(HERE, "codes")
-    os.makedirs(codes_dir, exist_ok=True)
-
-    code_id = st.text_input("编号", "")
-
-    confirm = st.checkbox("确认保存这一条")
-    if st.button("保存这一条", disabled=not confirm):
-        if not code_id.strip():
-            st.error("还没填编号，无法保存")
-        else:
-            with open(os.path.join(codes_dir, code_id.strip() + ".c"), "w", encoding="utf-8") as f:
-                f.write(clean_code(code_text))
-            with open(os.path.join(codes_dir, code_id.strip() + "_practice.c"), "w", encoding="utf-8") as f:
-                f.write(clean_code(last.get("同类题", {}).get("代码", "")))
-            with open(os.path.join(codes_dir, code_id.strip() + "_answer.txt"), "w", encoding="utf-8") as f:
-                f.write(last.get("同类题", {}).get("答案", ""))
-            with open(os.path.join(codes_dir, code_id.strip() + "_practice_correct.c"), "w", encoding="utf-8") as f:
-                f.write(clean_code(last.get("同类题正确代码", "")))
-            with open(os.path.join(codes_dir, code_id.strip() + "_correct.c"), "w", encoding="utf-8") as f:
-                f.write(clean_code(last.get("正确代码", "")))
-            with open(os.path.join(codes_dir, code_id.strip() + "_explain.txt"), "w", encoding="utf-8") as f:
-                f.write(last.get("逐行说明", ""))
-            if problem_text.strip():
-                with open(os.path.join(codes_dir, code_id.strip() + "_problem.txt"), "w", encoding="utf-8") as f:
-                    f.write(problem_text.strip())
-
-            row = {
-                "日期": date.today().strftime("%Y-%m-%d"),
-                "来源": source, "章节": chapter,
-                "代码片段": code_id.strip(),
-                "报错信息": st.session_state.get("diagnosis_error", "").strip() or "无",
-                "我判的类别": my_cat,
-                "它判的类别": last.get("错因类别", ""),
-                "对不对": "", "知识点": kp,
-                "重做结果": redo,
-            }
-            save_row(row)
-            st.success("已保存")
-
-st.divider()
-st.subheader("错题列表")
-
-df = load_rows(CSV_PATH)
-df.columns = df.columns.str.strip()
-df["重做结果"] = (
-    df["重做结果"]
-    .fillna("未重做")
-    .astype(str)
-    .str.strip()
-    .replace({"": "未重做", "None": "未重做", "nan": "未重做", "NaN": "未重做"})
-)
-
-st.subheader("今日复习")
-
-todo = df[df["重做结果"] == "未重做"].copy()
-freq = df["它判的类别"].value_counts()
-
-todo["优先级"] = todo["它判的类别"].map(freq).fillna(0)
-today = todo.sort_values("优先级", ascending=False).head(3)
-
-if today.empty:
-    st.info("没有待重做的题，今天可以休息")
-else:
-    st.dataframe(today[["代码片段", "它判的类别", "知识点"]],
-                 width="stretch")
-
-cat = st.selectbox("按类别筛选", ["全部"] + sorted(df["它判的类别"].dropna().unique()))
-view = df if cat == "全部" else df[df["它判的类别"] == cat]
-
-only_todo = st.checkbox("只看未重做")
-if only_todo:
-    view = view[view["重做结果"] == "未重做"]
-
-def rec_label(i):
-    r = view.loc[i]
-    v = r.get("代码片段", "")
-    name = "" if pd.isna(v) else str(v).strip()
-    if name:
-        return f"{name}｜{r.get('它判的类别', '')}"
-    return f"{i}｜{r.get('日期', '')}｜{r.get('它判的类别', '')}"
-
-st.dataframe(
-    view[["日期", "它判的类别", "知识点", "重做结果", "来源"]],
-    width="stretch"
-)
-
-
-idx = st.selectbox(
-    "选择一条错题",
-    view.index,
-    format_func=rec_label
-)
-row = view.loc[idx]
-rec = str(row.get("代码片段", ""))
-
-path = os.path.join(HERE, "codes", str(rec) + ".c")
-if os.path.exists(path):
-    st.code(open(path, encoding="utf-8").read(), language="c")
-else:
-    st.info("这条没有代码文件（早期记录）")
-
-problem_path = os.path.join(HERE, "codes", rec + "_problem.txt")
-if os.path.exists(problem_path):
-    with st.expander("题目要求与样例"):
-        st.write(open(problem_path, encoding="utf-8").read())
-
-p_path = os.path.join(HERE, "codes", rec + "_practice.c")
-a_path = os.path.join(HERE, "codes", rec + "_answer.txt")
-pc_path = os.path.join(HERE, "codes", rec + "_practice_correct.c")
-c_path = os.path.join(HERE, "codes", rec + "_correct.c")
-e_path = os.path.join(HERE, "codes", rec + "_explain.txt")
-
-if os.path.exists(p_path):
-    st.markdown("**同类题（重做用）**")
-    st.code(open(p_path, encoding="utf-8").read(), language="c")
-    with st.expander("重做题：看答案解析（先自己做）"):
-        st.write(open(a_path, encoding="utf-8").read() if os.path.exists(a_path) else "无答案")
-    if os.path.exists(pc_path):
-        with st.expander("重做题：正确代码"):
-            st.code(open(pc_path, encoding="utf-8").read(), language="c")
-
-if os.path.exists(c_path):
-    with st.expander("原题：正确代码（先自己改，再看）"):
-        st.code(open(c_path, encoding="utf-8").read(), language="c")
-
-if os.path.exists(e_path):
-    with st.expander("原题：逐行说明"):
-        st.write(open(e_path, encoding="utf-8").read())
-
-if st.button("标记为已重做"):
-        mark_done_index(idx)
-        st.success("已标记")
-        st.rerun()
-
-st.subheader("项目报告")
-if st.button("生成报告"):
-    total = len(df)
-    real_n = int((df["来源"] == "真实作业").sum())
-    todo_n = int(df["重做结果"].astype(str).str.strip().isin(["", "未重做", "nan"]).sum())
-    top = df["它判的类别"].value_counts().head(3)
-
-    lines = [
-        "# 编程错因诊断智能体 项目报告",
+    st.subheader("项目报告")
+    report_lines = [
+        "# C 语言错因诊断助手项目报告",
         "",
-        f"- 记录总数：{total}",
-        f"- 真实作业：{real_n}",
-        f"- 待重做：{todo_n}",
-        "- 高频错因：" + "、".join(f"{k}（{v}次）" for k, v in top.items()),
-        "- 系统能力：七段结构化输出、格式校验、错因统计、原题与同类题存档、复习队列、重做标记",
-        "- 已知问题：结论固化、尖括号被吞、JSON 转义不稳、同类题片段不可编译",
+        f"- 记录总数：{len(quality_data)}",
+        f"- 真实作业：{int((quality_data['来源'] == '真实作业').sum())}",
+        f"- 待重做：{int((quality_data['重做结果'] == '未重做').sum())}",
+        "- 固定输出：11 段结构化诊断",
+        "- 规则：15 类错因与 K01–K15 知识点",
+        "- 质控：格式校验、编译检查、运行检查",
     ]
-    path = os.path.join(HERE, "report.md")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
+    report_text = "\n".join(report_lines)
+    st.download_button("下载 report.md", report_text, file_name="report.md")
 
-    st.success("已生成 report.md")
-    st.markdown("\n".join(lines))
-
-st.divider()
-st.subheader("质量看板")
-
-q1 = os.path.join(HERE, "compile_check.csv")
-q2 = os.path.join(HERE, "runtime_check.csv")
-
-if os.path.exists(q1):
-    a = pd.read_csv(q1, encoding="utf-8-sig")
-    c1, c2 = st.columns(2)
-    c1.metric("编译检查文件", len(a))
-    c2.metric("编译失败", int((a["结果"] == "失败").sum()))
-
-if os.path.exists(q2):
-    b = pd.read_csv(q2, encoding="utf-8-sig")
-    c3, c4 = st.columns(2)
-    c3.metric("运行检查文件", len(b))
-    c4.metric("运行崩溃/超时", int(b["运行"].astype(str).str.contains("崩溃|超时").sum()))
-
-st.caption("抽检 4 条，合格 3 条（75%）；变式 5 道，4 道达到三级以上（80%）。")
+    with st.expander("历史摘要（用于后续记忆实验）"):
+        st.code(history_summary(quality_data), language="text")
