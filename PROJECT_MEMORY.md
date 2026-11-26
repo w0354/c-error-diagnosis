@@ -18,6 +18,7 @@
 - UI V2 使用 `app_v2.py` 预览，稳定入口仍为 `app.py`。
 - 改版前备份：`D:\python-learn\diagnosis_app_backups`
 - Git 回退标签：`working-diagnosis-before-ui-20261126`
+- Supabase `records` 表已成为正式数据源，现有 36 条记录已迁移。
 
 ## 当前阶段目标
 
@@ -35,11 +36,12 @@
 
 - 原始数据恢复包：`D:\python-learn\diagnosis_data_recovery_20261125`
 - DeepSeek Key 只保存在 `.streamlit/secrets.toml`，不得提交。
-- Streamlit Community Cloud 本地文件不能作为长期数据库。
+- Supabase Secret Key 只保存在本机和 Streamlit Secrets，不得提交。
+- 本地 CSV 与 `codes` 目录只作为迁移前备份。
 
 ## 尚未完成
 
-- 云端配置 DeepSeek Secret。
-- 接入持久化数据库。
+- 在 Streamlit Cloud 配置 Supabase Secrets。
+- 将公开入口切换到 V2。
 - 第一位真实用户测试。
 - 记忆注入 A/B 对照实验。

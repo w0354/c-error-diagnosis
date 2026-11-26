@@ -29,6 +29,25 @@ DeepSeek API Key。该文件已加入 `.gitignore`，不得提交。
 - 接口地址：`https://api.deepseek.com`
 - 系统提示词：`prompt_v6.txt`
 
+## 数据存储
+
+错题主数据保存在 Supabase 的 `records` 表中。首次建库使用
+`supabase_schema.sql`，现有 CSV 数据通过以下命令迁移：
+
+```powershell
+python migrate_to_supabase.py
+```
+
+本地 `records_v3.csv` 与 `codes` 目录保留为迁移前备份，不再作为网页的
+正式数据源。
+
+需要在 `.streamlit/secrets.toml` 中配置：
+
+```toml
+SUPABASE_URL = "你的 Supabase Project URL"
+SUPABASE_SERVICE_ROLE_KEY = "你的 Secret key"
+```
+
 ## V2 界面预览
 
 公开入口暂时仍是 `app.py`。新版界面在完成验收前通过以下命令本地预览：
@@ -44,11 +63,11 @@ V2 将页面拆分为“一键诊断”“错题库与复习”“项目质量�
 
 - API 回答仍需通过 11 段格式校验，不合格时禁止保存。
 - 题目可以留空；只有无法从代码、报错或运行现象判断是否符合题意时，才会返回“需题目”。
-- Streamlit Community Cloud 的本地文件不能作为长期数据库。
-- 新记录和“已重做”状态在云端重启后可能丢失。
+- V2 已使用 Supabase 持久化，公开入口切换前仍应通过 V2 预览版验收。
+- 多用户数据隔离和账号权限尚未实现。
 
 ## 下一步
 
-1. 接入持久化存储。
+1. 完成 V2 公开入口切换。
 2. 完成第一位真实用户测试。
 3. 开展有记忆与无记忆的 A/B 对照实验。

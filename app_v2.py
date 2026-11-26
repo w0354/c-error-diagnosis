@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import csv
 import html
-import os
 import re
-import shutil
 from datetime import date
 from pathlib import Path
 
@@ -12,6 +9,13 @@ import pandas as pd
 import streamlit as st
 
 from diagnose import DiagnosisError, api_key_configured, diagnose
+from supabase_store import (
+    SupabaseError,
+    find_record,
+    insert_record,
+    list_records,
+    update_redo,
+)
 from validator import CATS, check
 from validator import parse as parse_sections
 
@@ -30,6 +34,17 @@ ROW_FIELDS = [
     "知识点",
     "重做结果",
     "来源",
+]
+DB_TEXT_FIELDS = [
+    "problem_text",
+    "student_code",
+    "practice_scenario",
+    "practice_code",
+    "practice_answer",
+    "practice_correct_code",
+    "correct_code",
+    "explanation",
+    "raw_response",
 ]
 CHAPTER = {
     "K01": "第1章",
@@ -57,21 +72,36 @@ CATEGORY_ALIASES = {
 
 
 def load_rows() -> pd.DataFrame:
-    with CSV_PATH.open(encoding="utf-8-sig", newline="") as handle:
-        rows = list(csv.reader(handle))
-    if not rows:
-        return pd.DataFrame(columns=ROW_FIELDS)
+    try:
+        rows = list_records()
+        st.session_state["supabase_error"] = ""
+    except SupabaseError as exc:
+        st.session_state["supabase_error"] = str(exc)
+        return pd.DataFrame(columns=ROW_FIELDS + DB_TEXT_FIELDS + ["数据库ID", "显示编号"])
 
-    header = [item.strip() for item in rows[0]]
-    positions = {name: header.index(name) for name in ROW_FIELDS if name in header}
     data = []
-    for raw in rows[1:]:
-        row = {}
-        for name in ROW_FIELDS:
-            position = positions.get(name)
-            row[name] = raw[position].strip() if position is not None and position < len(raw) else ""
-        data.append(row)
-    return pd.DataFrame(data, columns=ROW_FIELDS)
+    for row in rows:
+        view_row = {
+            "数据库ID": str(row.get("id", "")),
+            "日期": str(row.get("date_label") or ""),
+            "章节": str(row.get("chapter") or ""),
+            "代码片段": str(row.get("display_id") or ""),
+            "显示编号": str(row.get("display_id") or ""),
+            "报错信息": str(row.get("compiler_error") or ""),
+            "我判的类别": str(row.get("my_category") or ""),
+            "它判的类别": str(row.get("ai_category") or ""),
+            "对不对": "",
+            "知识点": str(row.get("knowledge") or ""),
+            "重做结果": str(row.get("redo_status") or "未重做"),
+            "来源": str(row.get("source") or ""),
+        }
+        for field in DB_TEXT_FIELDS:
+            view_row[field] = str(row.get(field) or "")
+        data.append(view_row)
+    return pd.DataFrame(
+        data,
+        columns=ROW_FIELDS + DB_TEXT_FIELDS + ["数据库ID", "显示编号"],
+    )
 
 
 def normalize_category(value: object) -> str:
@@ -93,17 +123,17 @@ def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         .str.strip()
         .replace({"": "未重做", "None": "未重做", "nan": "未重做", "NaN": "未重做"})
     )
-    display_ids = []
-    for index, raw_id in zip(df.index, df["代码片段"]):
-        code_id = str(raw_id).strip()
-        has_code_file = bool(code_id) and (CODES_DIR / f"{code_id}.c").exists()
-        looks_like_image = bool(code_id) and Path(code_id).suffix.lower() in {
-            ".png",
-            ".jpg",
-            ".jpeg",
-        }
-        display_ids.append(code_id if has_code_file or looks_like_image else f"H{int(index) + 1:03d}")
-    df["显示编号"] = display_ids
+    if "显示编号" not in df.columns:
+        display_ids = []
+        for index, raw_id in zip(df.index, df["代码片段"]):
+            code_id = str(raw_id).strip()
+            looks_like_image = bool(code_id) and Path(code_id).suffix.lower() in {
+                ".png",
+                ".jpg",
+                ".jpeg",
+            }
+            display_ids.append(code_id if looks_like_image else f"H{int(index) + 1:03d}")
+        df["显示编号"] = display_ids
     return df
 
 
@@ -151,76 +181,36 @@ def save_record(
     compiler_error: str,
     problem: str,
     result: dict,
+    raw_response: str,
 ) -> None:
-    CODES_DIR.mkdir(exist_ok=True)
-    files = {
-        f"{code_id}.c": clean_code(code),
-        f"{code_id}_practice.c": clean_code(result["同类题代码"]),
-        f"{code_id}_answer.txt": result["同类题答案"],
-        f"{code_id}_practice_correct.c": clean_code(result["同类题正确代码"]),
-        f"{code_id}_correct.c": clean_code(result["正确代码"]),
-        f"{code_id}_explain.txt": result["逐行说明"],
-    }
-    if problem.strip():
-        files[f"{code_id}_problem.txt"] = problem.strip()
-
-    for filename, content in files.items():
-        (CODES_DIR / filename).write_text(content, encoding="utf-8")
-
-    exists = CSV_PATH.exists() and CSV_PATH.stat().st_size > 0
-    with CSV_PATH.open("a", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS)
-        if not exists:
-            writer.writeheader()
-        writer.writerow(
-            {
-                "日期": date.today().strftime("%Y-%m-%d"),
-                "章节": chapter,
-                "代码片段": code_id,
-                "报错信息": compiler_error.strip() or "无",
-                "我判的类别": my_category,
-                "它判的类别": result["错因类别"],
-                "对不对": "",
-                "知识点": result["知识点"],
-                "重做结果": redo,
-                "来源": source,
-            }
-        )
+    insert_record(
+        {
+            "display_id": code_id,
+            "date_label": date.today().strftime("%Y-%m-%d"),
+            "chapter": chapter,
+            "source": source,
+            "compiler_error": compiler_error.strip() or "无",
+            "my_category": my_category,
+            "ai_category": result["错因类别"],
+            "knowledge": result["知识点"],
+            "redo_status": redo,
+            "problem_text": problem.strip(),
+            "student_code": clean_code(code),
+            "practice_scenario": result["同类题情景"],
+            "practice_code": clean_code(result["同类题代码"]),
+            "practice_answer": result["同类题答案"],
+            "practice_correct_code": clean_code(result["同类题正确代码"]),
+            "correct_code": clean_code(result["正确代码"]),
+            "explanation": result["逐行说明"],
+            "raw_response": raw_response,
+        }
+    )
 
 
-def mark_done(record_id: str) -> int:
-    if not record_id:
+def mark_done(record_uuid: str) -> int:
+    if not record_uuid:
         return 0
-    shutil.copy(CSV_PATH, str(CSV_PATH) + ".bak")
-    with CSV_PATH.open(encoding="utf-8-sig", newline="") as handle:
-        rows = list(csv.reader(handle))
-    header = [item.strip() for item in rows[0]]
-    code_index = header.index("代码片段")
-    done_index = header.index("重做结果")
-    changed = 0
-    for row in rows[1:]:
-        if len(row) > max(code_index, done_index) and row[code_index].strip() == record_id:
-            row[done_index] = "√ 已重做"
-            changed += 1
-    with CSV_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
-        csv.writer(handle).writerows(rows)
-    return changed
-
-
-def mark_done_at_index(index: int) -> None:
-    shutil.copy(CSV_PATH, str(CSV_PATH) + ".bak")
-    with CSV_PATH.open(encoding="utf-8-sig", newline="") as handle:
-        rows = list(csv.reader(handle))
-    header = [item.strip() for item in rows[0]]
-    done_index = header.index("重做结果")
-    row_number = int(index) + 1
-    if row_number >= len(rows):
-        raise ValueError("记录位置超出 CSV 范围。")
-    while len(rows[row_number]) <= done_index:
-        rows[row_number].append("")
-    rows[row_number][done_index] = "√ 已重做"
-    with CSV_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
-        csv.writer(handle).writerows(rows)
+    return update_redo(record_uuid)
 
 
 def history_summary(df: pd.DataFrame) -> str:
@@ -324,7 +314,11 @@ def render_save_form(result: dict, valid: bool) -> None:
     with st.form("save_diagnosis_record"):
         col1, col2, col3 = st.columns(3)
         code_id = col1.text_input("编号", placeholder="例如 R004")
-        source = col2.selectbox("来源", ["真实作业", "构造测试", "挑战测试"])
+        source = col2.selectbox(
+            "来源",
+            ["真实作业", "构造测试", "挑战测试"],
+            index=1,
+        )
         chapter = col3.text_input("章节", automatic_chapter)
         col4, col5 = st.columns(2)
         my_category = col4.text_input("我判的类别", "没判出")
@@ -334,30 +328,37 @@ def render_save_form(result: dict, valid: bool) -> None:
             "题目要求与样例",
             key="problem_input",
             height=130,
-            placeholder="可选；会保存为单独的题目文件。",
+            placeholder="可选；会与代码、诊断结果一起保存到 Supabase。",
         )
         confirmed = st.checkbox("确认保存这一条")
-        submitted = st.form_submit_button("保存记录", disabled=not confirmed)
+        submitted = st.form_submit_button("保存记录")
 
     if submitted:
-        if not code_id.strip():
+        if not confirmed:
+            st.error("请先勾选“确认保存这一条”。")
+        elif not code_id.strip():
             st.error("请填写记录编号。")
-        elif (CODES_DIR / f"{code_id.strip()}.c").exists():
-            st.error("这个编号已经存在，请换一个编号。")
         else:
-            save_record(
-                code_id=code_id.strip(),
-                source=source,
-                chapter=chapter,
-                my_category=my_category,
-                redo=redo,
-                code=code,
-                compiler_error=st.session_state.get("diagnosis_error", ""),
-                problem=problem,
-                result=result,
-            )
-            st.success(f"已保存 {code_id.strip()}。")
-            st.rerun()
+            try:
+                if find_record(code_id.strip()):
+                    st.error("这个编号已经存在，请换一个编号。")
+                else:
+                    save_record(
+                        code_id=code_id.strip(),
+                        source=source,
+                        chapter=chapter,
+                        my_category=my_category,
+                        redo=redo,
+                        code=code,
+                        compiler_error=st.session_state.get("diagnosis_error", ""),
+                        problem=problem,
+                        result=result,
+                        raw_response=st.session_state.get("raw_text", ""),
+                    )
+                    st.success(f"已保存到 Supabase：{code_id.strip()}。")
+                    st.rerun()
+            except SupabaseError as exc:
+                st.error(str(exc))
 
 
 st.set_page_config(layout="wide", page_title="C 语言错因诊断助手", page_icon="🩺")
@@ -381,7 +382,7 @@ with st.sidebar:
     else:
         st.error("DeepSeek API 未配置")
     st.caption("诊断规则：v6 / 11 段 / 15 类错因 / K01–K15")
-    st.warning("云端新增记录暂不保证永久保存，正式数据请先保存在本地。")
+    st.success("错题数据保存到 Supabase")
     if max_calls > 0:
         remaining = max(0, max_calls - st.session_state["api_call_count"])
         st.caption(f"本会话剩余诊断次数：{remaining}")
@@ -447,6 +448,8 @@ with tab_diagnose:
 
 with tab_records:
     dataframe = normalize_dataframe(load_rows())
+    if st.session_state.get("supabase_error"):
+        st.error(st.session_state["supabase_error"])
     st.subheader("当前档案")
     metric1, metric2, metric3, metric4 = st.columns(4)
     metric1.metric("记录总数", len(dataframe))
@@ -495,54 +498,51 @@ with tab_records:
 
         selected_index = st.selectbox("查看一条记录", filtered.index, format_func=record_label)
         record = filtered.loc[selected_index]
-        record_id = str(record.get("代码片段", "")).strip()
         display_id = str(record.get("显示编号", "")).strip()
-        code_path = CODES_DIR / f"{record_id}.c"
-        problem_path = CODES_DIR / f"{record_id}_problem.txt"
-        practice_path = CODES_DIR / f"{record_id}_practice.c"
-        answer_path = CODES_DIR / f"{record_id}_answer.txt"
-        practice_correct_path = CODES_DIR / f"{record_id}_practice_correct.c"
-        correct_path = CODES_DIR / f"{record_id}_correct.c"
-        explain_path = CODES_DIR / f"{record_id}_explain.txt"
+        record_uuid = str(record.get("数据库ID", "")).strip()
+        student_code = str(record.get("student_code", "")).strip()
+        problem_text = str(record.get("problem_text", "")).strip()
+        practice_code = str(record.get("practice_code", "")).strip()
+        practice_answer = str(record.get("practice_answer", "")).strip()
+        practice_correct_code = str(record.get("practice_correct_code", "")).strip()
+        correct_code = str(record.get("correct_code", "")).strip()
+        explanation = str(record.get("explanation", "")).strip()
 
         with st.container(border=True):
             st.subheader(record_label(selected_index))
-            if record_id and record_id != display_id:
-                st.caption(f"原始记录代号：{record_id}")
-            if code_path.exists():
+            st.caption(f"记录编号：{display_id}")
+            if student_code:
                 st.markdown("**原始代码**")
-                st.code(code_path.read_text(encoding="utf-8"), language="c")
+                st.code(student_code, language="c")
             else:
-                st.info("这条记录没有原始代码文件。")
-            if problem_path.exists():
+                st.info("这条历史记录没有保存原始代码文本。")
+            if problem_text:
                 with st.expander("题目要求与样例"):
-                    st.write(problem_path.read_text(encoding="utf-8"))
-            if practice_path.exists():
+                    st.write(problem_text)
+            if practice_code:
                 with st.expander("同类题"):
-                    st.code(practice_path.read_text(encoding="utf-8"), language="c")
+                    st.code(practice_code, language="c")
                 with st.expander("同类题答案"):
-                    st.write(answer_path.read_text(encoding="utf-8") if answer_path.exists() else "无")
+                    st.write(practice_answer or "无")
                 with st.expander("同类题正确代码"):
-                    st.code(
-                        practice_correct_path.read_text(encoding="utf-8")
-                        if practice_correct_path.exists()
-                        else "无",
-                        language="c",
-                    )
-            if correct_path.exists():
+                    st.code(practice_correct_code or "无", language="c")
+            if correct_code:
                 with st.expander("正确代码"):
-                    st.code(correct_path.read_text(encoding="utf-8"), language="c")
-            if explain_path.exists():
+                    st.code(correct_code, language="c")
+            if explanation:
                 with st.expander("逐行说明"):
-                    st.write(explain_path.read_text(encoding="utf-8"))
+                    st.write(explanation)
 
             if st.button("标记为已重做"):
                 try:
-                    mark_done_at_index(selected_index)
-                    st.success("已标记为已重做。")
-                    st.rerun()
-                except ValueError as exc:
-                    st.warning(str(exc))
+                    changed = mark_done(record_uuid)
+                    if changed:
+                        st.success("已在 Supabase 中标记为已重做。")
+                        st.rerun()
+                    else:
+                        st.warning("没有找到可更新的记录。")
+                except SupabaseError as exc:
+                    st.error(str(exc))
 
 with tab_quality:
     quality_data = normalize_dataframe(load_rows())
