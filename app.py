@@ -1,7 +1,7 @@
 import json
 import streamlit as st
 import re
-from validator import check
+from validator import CATS, check
 from diagnose import DiagnosisError, api_key_configured, diagnose
 import csv
 from datetime import date
@@ -107,6 +107,8 @@ st.title("🩺 AI 错因诊断工作台")
 st.caption("输入代码和报错可直接诊断；生成结果仍必须通过 11 段校验后才能保存。")
 
 st.session_state.setdefault("raw_text", "")
+st.session_state.setdefault("api_call_count", 0)
+MAX_API_CALLS_PER_SESSION = 10
 
 with st.container(border=True):
     st.subheader("⚡ 一键诊断")
@@ -131,12 +133,17 @@ with st.container(border=True):
     if diagnose_clicked:
         if not api_code.strip():
             st.error("请先输入出错的 C 代码。")
+        elif st.session_state["api_call_count"] >= MAX_API_CALLS_PER_SESSION:
+            st.error("本次会话的诊断次数已用完，请刷新页面后继续，或稍后再试。")
         else:
             try:
+                st.session_state["api_call_count"] += 1
                 with st.spinner("DeepSeek 正在诊断，请稍候……"):
                     result = diagnose(api_code, api_error)
                 st.session_state["raw_text"] = result
                 st.session_state["diagnosis_source"] = "DeepSeek API"
+                st.session_state["code_input"] = api_code
+                st.session_state["diagnosis_error"] = api_error
                 st.rerun()
             except DiagnosisError as exc:
                 st.error(str(exc))
@@ -145,6 +152,11 @@ with st.container(border=True):
 
 if st.session_state.get("diagnosis_source"):
     st.info(f"最近一次结果来源：{st.session_state['diagnosis_source']}")
+
+st.caption(
+    f"费用保护：当前浏览器会话还可调用 "
+    f"{max(0, MAX_API_CALLS_PER_SESSION - st.session_state['api_call_count'])} 次。"
+)
 
 # 将页面切成左右两栏
 col_left, col_right = st.columns([1, 1], gap="large")
@@ -237,27 +249,35 @@ st.subheader("错因分布")
 import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 df = load_rows(CSV_PATH)
+df.columns = df.columns.str.strip()
 df["它判的类别"] = df["它判的类别"].astype(str).str.strip()
-st.write(df["它判的类别"].value_counts())
 
 df["重做结果"] = (
     df["重做结果"].fillna("未重做").astype(str).str.strip()
     .replace({"": "未重做", "None": "未重做", "nan": "未重做", "NaN": "未重做"})
 )
 
+fix = {"逻辑错误（整数除法）": "整数除法与除零",
+       "逻辑错误(整数除法)": "整数除法与除零",
+       "数据下标越界": "数组下标越界",
+       "输入输出格式问题": "输入输出格式"}
+df["它判的类别"] = df["它判的类别"].replace(fix)
+
+def normalize_category(value):
+    value = str(value).strip()
+    for category in CATS:
+        if value == category or value.startswith(category + "（") or value.startswith(category + "("):
+            return category
+    return value
+
+df["它判的类别"] = df["它判的类别"].map(normalize_category)
+
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("记录总数", len(df))
 c2.metric("真实作业", int((df["来源"] == "真实作业").sum()))
 c3.metric("待重做", int((df["重做结果"] == "未重做").sum()))
-c4.metric("覆盖错因", df["它判的类别"].nunique())
+c4.metric("覆盖错因", df.loc[df["它判的类别"].isin(CATS), "它判的类别"].nunique())
 
-fix = {"逻辑错误（整数除法）": "整数除法与除零",
-       "逻辑错误(整数除法)": "整数除法与除零",
-       "数据下标越界": "数组下标越界",}
-df["它判的类别"] = df["它判的类别"].astype(str).str.strip().replace(fix)
-
-df.columns = df.columns.str.strip()
-st.write("检测到的列名：", list(df.columns))
 order = ["漏分号", "括号不配对", "预处理指令错误", "拼写错误",
          "变量未声明", "类型不匹配", "输入输出格式",
          "数组下标越界", "循环边界", "指针问题",
@@ -361,7 +381,8 @@ else:
             row = {
                 "日期": date.today().strftime("%Y-%m-%d"),
                 "来源": source, "章节": chapter,
-                "代码片段": code_id.strip(), "报错信息": "无",
+                "代码片段": code_id.strip(),
+                "报错信息": st.session_state.get("diagnosis_error", "").strip() or "无",
                 "我判的类别": my_cat,
                 "它判的类别": last.get("错因类别", ""),
                 "对不对": "", "知识点": kp,
@@ -453,14 +474,6 @@ if os.path.exists(c_path):
 
 if os.path.exists(e_path):
     with st.expander("原题：逐行说明"):
-        st.write(open(e_path, encoding="utf-8").read())
-
-if os.path.exists(c_path):
-    with st.expander("正确代码（先自己改，再看）"):
-        st.code(open(c_path, encoding="utf-8").read(), language="c")
-
-if os.path.exists(e_path):
-    with st.expander("逐行说明"):
         st.write(open(e_path, encoding="utf-8").read())
 
 if st.button("标记为已重做"):
