@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tomllib
 import urllib.error
 import urllib.request
@@ -127,6 +128,13 @@ def _extract_content(payload: dict) -> str:
     return content.strip()
 
 
+def _normalize_original_section(content: str, code: str) -> str:
+    expected = "\n".join(code.splitlines()[:3])
+    pattern = re.compile(r"【原文核对】\s*.*?(?=\s*【错因类别】)", re.DOTALL)
+    replacement = "【原文核对】\n" + expected + "\n\n"
+    return pattern.sub(lambda _: replacement, content, count=1)
+
+
 def diagnose(
     code: str,
     compiler_error: str,
@@ -190,4 +198,5 @@ def diagnose(
         message = payload["error"].get("message", "未知错误")
         raise DiagnosisError(f"DeepSeek 返回错误：{message}")
 
-    return _extract_content(payload)
+    content = _extract_content(payload)
+    return _normalize_original_section(content, code)
