@@ -310,6 +310,7 @@ def render_save_form(result: dict, valid: bool) -> None:
         return
 
     st.subheader("保存错题")
+    st.caption("格式校验会自动完成；AI 生成代码的编译质量由项目维护者抽样复核，不要求使用者自行判断。")
     knowledge = result.get("知识点", "")
     automatic_chapter = CHAPTER.get(knowledge[:3], "第3章")
     with st.form("save_diagnosis_record"):
@@ -332,16 +333,11 @@ def render_save_form(result: dict, valid: bool) -> None:
             placeholder="可选；会与代码、诊断结果一起保存到 Supabase。",
         )
         confirmed = st.checkbox("确认保存这一条")
-        quality_confirmed = st.checkbox(
-            "我已用 C 编译器验证：同类题能复现预期问题，正确代码能编译运行"
-        )
         submitted = st.form_submit_button("保存记录")
 
     if submitted:
         st.session_state["save_notice"] = ""
-        if not quality_confirmed:
-            st.error("请先用编译器验证同类题和正确代码，再勾选质量确认。")
-        elif not confirmed:
+        if not confirmed:
             st.error("请先勾选“确认保存这一条”。")
         elif not code_id.strip():
             st.error("请填写记录编号。")
