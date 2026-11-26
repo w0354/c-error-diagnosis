@@ -92,6 +92,17 @@ def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         .str.strip()
         .replace({"": "未重做", "None": "未重做", "nan": "未重做", "NaN": "未重做"})
     )
+    display_ids = []
+    for index, raw_id in zip(df.index, df["代码片段"]):
+        code_id = str(raw_id).strip()
+        has_code_file = bool(code_id) and (CODES_DIR / f"{code_id}.c").exists()
+        looks_like_image = bool(code_id) and Path(code_id).suffix.lower() in {
+            ".png",
+            ".jpg",
+            ".jpeg",
+        }
+        display_ids.append(code_id if has_code_file or looks_like_image else f"H{int(index) + 1:03d}")
+    df["显示编号"] = display_ids
     return df
 
 
@@ -193,6 +204,22 @@ def mark_done(record_id: str) -> int:
     with CSV_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
         csv.writer(handle).writerows(rows)
     return changed
+
+
+def mark_done_at_index(index: int) -> None:
+    shutil.copy(CSV_PATH, str(CSV_PATH) + ".bak")
+    with CSV_PATH.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.reader(handle))
+    header = [item.strip() for item in rows[0]]
+    done_index = header.index("重做结果")
+    row_number = int(index) + 1
+    if row_number >= len(rows):
+        raise ValueError("记录位置超出 CSV 范围。")
+    while len(rows[row_number]) <= done_index:
+        rows[row_number].append("")
+    rows[row_number][done_index] = "√ 已重做"
+    with CSV_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
+        csv.writer(handle).writerows(rows)
 
 
 def history_summary(df: pd.DataFrame) -> str:
@@ -407,7 +434,7 @@ with tab_records:
         st.info("当前没有待重做题目。")
     else:
         st.dataframe(
-            review[["代码片段", "它判的类别", "知识点"]],
+            review[["显示编号", "它判的类别", "知识点"]],
             width="stretch",
             hide_index=True,
         )
@@ -422,7 +449,7 @@ with tab_records:
         filtered = filtered[filtered["重做结果"] == "未重做"]
 
     st.dataframe(
-        filtered[["日期", "代码片段", "它判的类别", "知识点", "重做结果", "来源"]],
+        filtered[["显示编号", "日期", "它判的类别", "知识点", "重做结果", "来源"]],
         width="stretch",
         hide_index=True,
     )
@@ -432,12 +459,12 @@ with tab_records:
     else:
         def record_label(index: int) -> str:
             row = filtered.loc[index]
-            code_id = str(row.get("代码片段", "")).strip()
-            return f"{code_id or '无编号'}｜{row.get('它判的类别', '')}"
+            return f"{row.get('显示编号', '无编号')}｜{row.get('它判的类别', '')}"
 
         selected_index = st.selectbox("查看一条记录", filtered.index, format_func=record_label)
         record = filtered.loc[selected_index]
         record_id = str(record.get("代码片段", "")).strip()
+        display_id = str(record.get("显示编号", "")).strip()
         code_path = CODES_DIR / f"{record_id}.c"
         problem_path = CODES_DIR / f"{record_id}_problem.txt"
         practice_path = CODES_DIR / f"{record_id}_practice.c"
@@ -448,6 +475,8 @@ with tab_records:
 
         with st.container(border=True):
             st.subheader(record_label(selected_index))
+            if record_id and record_id != display_id:
+                st.caption(f"原始记录代号：{record_id}")
             if code_path.exists():
                 st.markdown("**原始代码**")
                 st.code(code_path.read_text(encoding="utf-8"), language="c")
@@ -475,13 +504,13 @@ with tab_records:
                 with st.expander("逐行说明"):
                     st.write(explain_path.read_text(encoding="utf-8"))
 
-            if record_id and st.button("标记为已重做"):
-                count = mark_done(record_id)
-                if count:
+            if st.button("标记为已重做"):
+                try:
+                    mark_done_at_index(selected_index)
                     st.success("已标记为已重做。")
                     st.rerun()
-                else:
-                    st.warning("没有找到可更新的记录。")
+                except ValueError as exc:
+                    st.warning(str(exc))
 
 with tab_quality:
     quality_data = normalize_dataframe(load_rows())
