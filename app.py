@@ -225,6 +225,37 @@ def history_summary(df: pd.DataFrame) -> str:
     )
 
 
+def quality_status(record_id: str) -> dict | None:
+    path = HERE / "runtime_audit.csv"
+    if not path.exists():
+        return None
+    audit = pd.read_csv(path, encoding="utf-8-sig")
+    if "记录" not in audit.columns:
+        return None
+    matches = audit[audit["记录"].astype(str) == str(record_id)]
+    if matches.empty:
+        return None
+    row = matches.iloc[0]
+    problems = str(row.get("问题") or "").strip()
+    reproduced = str(row.get("同类题错误复现") or "").strip()
+    output_match = str(row.get("原题输出匹配") or "").strip()
+    if problems:
+        status = "待修复"
+    elif output_match == "False":
+        status = "原题输出不匹配"
+    elif reproduced == "是":
+        status = "通过（错误已复现）"
+    else:
+        status = "通过（编译错误符合预期）"
+    return {
+        "status": status,
+        "problems": problems,
+        "output_match": output_match,
+        "reproduced": reproduced,
+        "compile": str(row.get("同类题编译") or ""),
+    }
+
+
 def render_result(raw_text: str) -> tuple[dict | None, bool, list[str]]:
     if not raw_text.strip():
         return None, False, []
@@ -528,6 +559,17 @@ with tab_records:
         with st.container(border=True):
             st.subheader(record_label(selected_index))
             st.caption(f"记录编号：{display_id}")
+            qa = quality_status(display_id)
+            if qa:
+                if qa["status"].startswith("通过"):
+                    st.success(f"质量审查：{qa['status']}")
+                else:
+                    st.warning(f"质量审查：{qa['status']}")
+                with st.expander("查看质量审查详情"):
+                    st.write(f"同类题编译：{qa['compile'] or '未审计'}")
+                    st.write(f"同类题错误复现：{qa['reproduced'] or '未验证'}")
+                    if qa["problems"]:
+                        st.write("问题：" + qa["problems"])
             if student_code:
                 st.markdown("**原始代码**")
                 st.code(student_code, language="c")
