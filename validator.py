@@ -44,20 +44,21 @@ def check(text):
         if not d.get(f):
             problems.append("缺少或为空：" + f)
     cat = d.get("错因类别", "").strip()
-    if cat not in CATS and cat not in SPECIAL_CATS:
+    base_cat = re.split(r"[（(]", cat, maxsplit=1)[0].strip()
+    if base_cat not in CATS and cat not in SPECIAL_CATS:
         problems.append("错因类别不在 15 类里")
     kp = d.get("知识点", "").strip()
-    if cat not in SPECIAL_CATS:
+    if base_cat not in SPECIAL_CATS:
         match = re.fullmatch(r"(K(?:0[1-9]|1[0-5]))｜([^\n]+)", kp)
         if not match:
             problems.append("知识点不是 K01–K15")
         elif match.group(2).strip() != KNOWLEDGE[match.group(1)]:
             problems.append("知识点名称与编号不匹配")
-    if cat not in SPECIAL_CATS and "main" not in d.get("同类题代码", ""):
+    if base_cat not in SPECIAL_CATS and "main" not in d.get("同类题代码", ""):
         problems.append("同类题不是完整程序")
-    if cat not in SPECIAL_CATS and "main" not in d.get("同类题正确代码", ""):
+    if base_cat not in SPECIAL_CATS and "main" not in d.get("同类题正确代码", ""):
         problems.append("同类题正确代码不是完整程序")
-    if cat not in SPECIAL_CATS and "main" not in d.get("正确代码", ""):
+    if base_cat not in SPECIAL_CATS and "main" not in d.get("正确代码", ""):
         problems.append("正确代码不是完整程序")
     if "```" in text:
         problems.append("回答中不能使用 Markdown 代码围栏")
