@@ -134,10 +134,11 @@ with st.container(border=True):
             placeholder="例如：expected '}' at end of input",
         )
         api_problem = st.text_area(
-            "题目要求与样例（可选）",
+            "题目要求与样例（可留空）",
             key="api_problem",
             height=140,
-            placeholder="填写题目要求、输入样例、预期输出和实际输出。代码能编译但结果不对时建议填写。",
+            placeholder="仅当代码能编译、运行结果取决于作业要求时填写。缺少分号、括号、未声明变量等可自证错误不需要题目。",
+            help="构造测试通常可以留空。只有无法从代码、报错或运行现象判断是否符合题意时，才需要补充题目和预期结果。",
         )
         diagnose_clicked = st.form_submit_button("开始诊断", type="primary")
 
