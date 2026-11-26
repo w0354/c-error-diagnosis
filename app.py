@@ -563,6 +563,48 @@ with tab_records:
 
 with tab_quality:
     quality_data = normalize_dataframe(load_rows())
+    runtime_audit_path = HERE / "runtime_audit.csv"
+    if runtime_audit_path.exists():
+        st.subheader("R004–R010 运行质量审查")
+        runtime_audit = pd.read_csv(runtime_audit_path, encoding="utf-8-sig")
+        issue_count = (
+            runtime_audit["问题"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .ne("")
+            .sum()
+        )
+        a1, a2, a3 = st.columns(3)
+        a1.metric("已审计记录", len(runtime_audit))
+        a2.metric("存在质量问题", int(issue_count))
+        a3.metric(
+            "同类题错误复现",
+            int((runtime_audit.get("同类题错误复现") == "是").sum()),
+        )
+        audit_columns = [
+            "记录",
+            "原题正确代码运行",
+            "同类题编译",
+            "同类题错误复现",
+            "问题",
+        ]
+        st.dataframe(
+            runtime_audit[
+                [column for column in audit_columns if column in runtime_audit.columns]
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+        report_path = HERE / "reports" / "R004-R010_quality_review.md"
+        if report_path.exists():
+            st.download_button(
+                "下载质量审查报告",
+                report_path.read_text(encoding="utf-8"),
+                file_name="R004-R010_quality_review.md",
+            )
+        st.caption("这是 R004–R010 的开发期审计结果，不代表最终产品准确率。")
+
     st.subheader("错因分布")
     left_chart, right_chart = st.columns(2)
     with left_chart:
