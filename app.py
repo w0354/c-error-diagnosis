@@ -334,6 +334,7 @@ def render_save_form(result: dict, valid: bool) -> None:
         submitted = st.form_submit_button("保存记录")
 
     if submitted:
+        st.session_state["save_notice"] = ""
         if not confirmed:
             st.error("请先勾选“确认保存这一条”。")
         elif not code_id.strip():
@@ -355,10 +356,17 @@ def render_save_form(result: dict, valid: bool) -> None:
                         result=result,
                         raw_response=st.session_state.get("raw_text", ""),
                     )
-                    st.success(f"已保存到 Supabase：{code_id.strip()}。")
+                    st.session_state["save_notice"] = code_id.strip()
                     st.rerun()
             except SupabaseError as exc:
                 st.error(str(exc))
+
+    if st.session_state.get("save_notice"):
+        saved_id = st.session_state["save_notice"]
+        st.success(
+            f"保存成功：{saved_id} 已写入 Supabase。"
+            "关闭电脑或重启网页后，仍可在“错题库与复习”中查看这条记录。"
+        )
 
 
 st.set_page_config(layout="wide", page_title="C 语言错因诊断助手", page_icon="🩺")
@@ -370,6 +378,7 @@ st.session_state.setdefault("raw_text", "")
 st.session_state.setdefault("api_call_count", 0)
 st.session_state.setdefault("code_input", "")
 st.session_state.setdefault("problem_input", "")
+st.session_state.setdefault("save_notice", "")
 try:
     max_calls = max(0, int(st.secrets.get("MAX_API_CALLS_PER_SESSION", 100)))
 except (TypeError, ValueError):
@@ -417,6 +426,7 @@ with tab_diagnose:
         submitted = st.form_submit_button("开始诊断", type="primary")
 
     if submitted:
+        st.session_state["save_notice"] = ""
         if not code_input.strip():
             st.error("请先输入出错的 C 代码。")
         elif max_calls > 0 and st.session_state["api_call_count"] >= max_calls:
@@ -439,6 +449,7 @@ with tab_diagnose:
     with st.expander("高级：粘贴已有诊断回答"):
         manual_text = st.text_area("粘贴【】格式回答", key="manual_result", height=220)
         if st.button("载入并校验"):
+            st.session_state["save_notice"] = ""
             st.session_state["raw_text"] = manual_text
             st.session_state["code_input"] = code_input
             st.session_state["diagnosis_error"] = error_input
