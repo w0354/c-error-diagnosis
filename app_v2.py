@@ -382,7 +382,11 @@ with st.sidebar:
     else:
         st.error("DeepSeek API 未配置")
     st.caption("诊断规则：v6 / 11 段 / 15 类错因 / K01–K15")
-    st.success("错题数据保存到 Supabase")
+    try:
+        database_count = len(list_records())
+        st.success(f"Supabase 已连接 · {database_count} 条记录")
+    except SupabaseError as exc:
+        st.error(f"Supabase 未连接：{exc}")
     if max_calls > 0:
         remaining = max(0, max_calls - st.session_state["api_call_count"])
         st.caption(f"本会话剩余诊断次数：{remaining}")
