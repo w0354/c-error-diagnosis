@@ -133,6 +133,12 @@ with st.container(border=True):
             height=110,
             placeholder="例如：expected '}' at end of input",
         )
+        api_problem = st.text_area(
+            "题目要求与样例（可选）",
+            key="api_problem",
+            height=140,
+            placeholder="填写题目要求、输入样例、预期输出和实际输出。代码能编译但结果不对时建议填写。",
+        )
         diagnose_clicked = st.form_submit_button("开始诊断", type="primary")
 
     if diagnose_clicked:
@@ -147,11 +153,12 @@ with st.container(border=True):
             try:
                 st.session_state["api_call_count"] += 1
                 with st.spinner("DeepSeek 正在诊断，请稍候……"):
-                    result = diagnose(api_code, api_error)
+                    result = diagnose(api_code, api_error, api_problem)
                 st.session_state["raw_text"] = result
                 st.session_state["diagnosis_source"] = "DeepSeek API"
                 st.session_state["code_input"] = api_code
                 st.session_state["diagnosis_error"] = api_error
+                st.session_state["problem_input"] = api_problem
                 st.rerun()
             except DiagnosisError as exc:
                 st.error(str(exc))
@@ -364,6 +371,12 @@ else:
         redo = st.text_input("重做结果", "未重做")
 
     code_text = st.text_area("原始代码", height=200, key="code_input")
+    problem_text = st.text_area(
+        "题目要求与样例",
+        height=140,
+        key="problem_input",
+        placeholder="可选。保存后可在错题详情中重新查看。",
+    )
 
     codes_dir = os.path.join(HERE, "codes")
     os.makedirs(codes_dir, exist_ok=True)
@@ -387,6 +400,9 @@ else:
                 f.write(clean_code(last.get("正确代码", "")))
             with open(os.path.join(codes_dir, code_id.strip() + "_explain.txt"), "w", encoding="utf-8") as f:
                 f.write(last.get("逐行说明", ""))
+            if problem_text.strip():
+                with open(os.path.join(codes_dir, code_id.strip() + "_problem.txt"), "w", encoding="utf-8") as f:
+                    f.write(problem_text.strip())
 
             row = {
                 "日期": date.today().strftime("%Y-%m-%d"),
@@ -462,6 +478,11 @@ if os.path.exists(path):
     st.code(open(path, encoding="utf-8").read(), language="c")
 else:
     st.info("这条没有代码文件（早期记录）")
+
+problem_path = os.path.join(HERE, "codes", rec + "_problem.txt")
+if os.path.exists(problem_path):
+    with st.expander("题目要求与样例"):
+        st.write(open(problem_path, encoding="utf-8").read())
 
 p_path = os.path.join(HERE, "codes", rec + "_practice.c")
 a_path = os.path.join(HERE, "codes", rec + "_answer.txt")

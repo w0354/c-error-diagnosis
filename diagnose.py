@@ -74,7 +74,12 @@ def _read_prompt() -> str:
         raise DiagnosisError("无法读取 prompt_v6.txt。") from exc
 
 
-def _build_messages(code: str, compiler_error: str, history: str) -> list[dict[str, str]]:
+def _build_messages(
+    code: str,
+    compiler_error: str,
+    problem: str,
+    history: str,
+) -> list[dict[str, str]]:
     user_parts = [
         "请严格按系统提示中的固定 11 段格式诊断下面的代码。",
         "",
@@ -86,6 +91,15 @@ def _build_messages(code: str, compiler_error: str, history: str) -> list[dict[s
         compiler_error.strip() or "未提供编译器报错。",
         "<<<编译器报错或运行现象结束>>>",
     ]
+    if problem.strip():
+        user_parts.extend(
+            [
+                "",
+                "<<<题目要求、样例与预期结果开始>>>",
+                problem.strip(),
+                "<<<题目要求、样例与预期结果结束>>>",
+            ]
+        )
     if history.strip():
         user_parts.extend(
             [
@@ -113,9 +127,16 @@ def _extract_content(payload: dict) -> str:
     return content.strip()
 
 
-def diagnose(code: str, compiler_error: str, history: str = "", timeout: int = 180) -> str:
+def diagnose(
+    code: str,
+    compiler_error: str,
+    problem: str = "",
+    history: str = "",
+    timeout: int = 180,
+) -> str:
     code = code.strip()
     compiler_error = compiler_error.strip()
+    problem = problem.strip()
     history = history.strip()
 
     if not code:
@@ -124,6 +145,8 @@ def diagnose(code: str, compiler_error: str, history: str = "", timeout: int = 1
         raise DiagnosisError("代码太长，请控制在 16000 个字符以内。")
     if len(compiler_error) > 6000:
         raise DiagnosisError("报错信息太长，请控制在 6000 个字符以内。")
+    if len(problem) > 8000:
+        raise DiagnosisError("题目要求和样例太长，请控制在 8000 个字符以内。")
     if len(history) > 4000:
         raise DiagnosisError("历史摘要太长，请控制在 4000 个字符以内。")
 
@@ -131,7 +154,7 @@ def diagnose(code: str, compiler_error: str, history: str = "", timeout: int = 1
     endpoint = settings["DEEPSEEK_BASE_URL"].rstrip("/") + "/chat/completions"
     body = {
         "model": settings["DEEPSEEK_MODEL"],
-        "messages": _build_messages(code, compiler_error, history),
+        "messages": _build_messages(code, compiler_error, problem, history),
         "temperature": 0.1,
         "max_tokens": 3500,
         "stream": False,
