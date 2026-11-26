@@ -304,7 +304,7 @@ def render_result(raw_text: str) -> tuple[dict | None, bool, list[str]]:
 
 def render_save_form(result: dict, valid: bool) -> None:
     category = result.get("错因类别", "")
-    if not valid or category not in CATS:
+    if not valid or normalize_category(category) not in CATS:
         st.info("只有普通错误且 11 段校验通过后才能保存。")
         return
 
