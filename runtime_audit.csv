@@ -1,0 +1,87 @@
+﻿记录,类别,原题正确代码编译,原题正确代码运行,原题正确代码输出,原题输出匹配,同类题编译,同类题正确代码编译,同类题运行,同类题正确运行,同类题输出,同类题正确输出,同类题正确输出匹配,同类题错误复现,问题,编译错误
+R004,函数返回值与参数,通过,正常,平均分=80.000000 最高分=100.000000 最低分=60.000000,True,失败,通过,,正常,,12,True,,,"C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R004_practice_src.c: In function 'main':
+C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R004_practice_src.c:6:11: error: called object 'sum' is not a function or function pointer
+     sum = sum(a, b, c);
+           ^
+C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R004_practice_src.c:4:18: note: declared here
+     int a, b, c, sum;
+                  ^
+"
+R005,数组下标越界,通过,正常,"学生的成绩：
+
+max=90.000000 min=50.000000 ave=70.000000",True,失败,通过,,正常,,15,True,,逻辑/运行类同类题产生了额外编译错误,"C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R005_practice_src.c: In function 'main':
+C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R005_practice_src.c:8:23: error: array subscript is not an integer
+         scanf(""%d"", &a[k]);
+                       ^
+C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R005_practice_src.c:10:18: error: array subscript is not an integer
+         s = s + a[k];
+                  ^
+C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R005_practice_src.c:4:9: warning: variable 'a' set but not used [-Wunused-but-set-variable]
+     int a[5];
+         ^
+"
+R006,逻辑错误,通过,正常,"学生的成绩：
+
+max=90 min=50 ave=70.00",True,通过,通过,正常,正常,ave=704261,ave=3,False,是,同类题正确代码输出不符合测试预期,
+R007,输入输出格式,通过,正常,"第1个学生三科平均分:2.00
+第2个学生三科平均分:5.00
+第3个学生三科平均分:8.00
+第4个学生三科平均分:11.00
+第5个学生三科平均分:14.00
+第1门课5个学生平均分:7.00
+第2门课5个学生平均分:8.00
+第3门课5个学生平均分:9.00",True,通过,通过,正常,正常,"学生1平均分:1.50
+学生2平均分:3.50
+学生3平均分:5.50
+课程1平均分:3.00
+课程2平均分:4.00","学生1平均分:1.50
+学生2平均分:3.50
+学生3平均分:5.50
+课程1平均分:3.00
+课程2平均分:4.00",True,否,同类题没有产生与正确代码不同的运行结果,
+R008,逻辑错误,通过,正常,"第1个学生三科平均分:2.00
+第2个学生三科平均分:5.00
+第3个学生三科平均分:8.00
+第4个学生三科平均分:11.00
+第5个学生三科平均分:14.00
+第1门课5个学生平均分:7.00
+第2门课5个学生平均分:8.00
+第3门课5个学生平均分:9.00",True,失败,通过,,正常,,"学生0平均分:1.50
+学生1平均分:3.50
+学生2平均分:5.50
+课程0平均分:3.00
+课程1平均分:4.00",True,,逻辑/运行类同类题产生了额外编译错误,"C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R008_practice_src.c: In function 'main':
+C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R008_practice_src.c:13:16: warning: unused variable 'avg1' [-Wunused-variable]
+         double avg1 = b / 2.0;
+                ^
+C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R008_practice_src.c:21:16: warning: unused variable 'avg2' [-Wunused-variable]
+         double avg2 = c / 3.0;
+                ^
+C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R008_practice_src.c:24:47: error: 'avg1' undeclared (first use in this function)
+         printf(""学生%d平均分:%.2f\n"", i, avg1);
+                                               ^
+C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R008_practice_src.c:24:47: note: each undeclared identifier is reported only once for each function it appears in
+C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R008_practice_src.c:27:47: error: 'avg2' undeclared (first use in this function)
+         printf(""课程%d平均分:%.2f\n"", j, avg2);
+                                               ^
+C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R008_practice_src.c:4:33: warning: variable 'course_avg' set but not used [-Wunused-but-set-variable]
+     double a[3][2], stu_avg[3], course_avg[2];
+                                 ^
+C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R008_practice_src.c:4:21: warning: variable 'stu_avg' set but not used [-Wunused-but-set-variable]
+     double a[3][2], stu_avg[3], course_avg[2];
+                     ^
+"
+R009,变量未初始化,通过,正常,"学生的成绩：
+
+max=5 min=1 ave=3.000000",True,通过,通过,正常,正常,sum=22 ave=3.666667,sum=21 ave=3.500000,True,是,,"C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R009_correct_src.c: In function 'main':
+C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R009_correct_src.c:5:20: warning: unused variable 'min' [-Wunused-variable]
+     int i, j, max, min;
+                    ^
+"
+R010,拼写错误,通过,正常,"输入字符：
+
+cba",True,失败,通过,,正常,,2,True,,,"C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R010_practice_src.c: In function 'main':
+C:\Users\wbl\AppData\Local\Temp\c-diagnosis-runtime-_7u8pfvy\R010_practice_src.c:9:40: error: expected ')' before ';' token
+     for (i = 0, j = len - 1; i < j; i++; j--) {
+                                        ^
+"

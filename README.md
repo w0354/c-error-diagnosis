@@ -61,6 +61,15 @@ python quality_audit.py
 Dev-C++ 的 MinGW 编译器。逻辑类错误的同类题应能编译但运行结果错误；
 若同类题产生额外编译错误，会被标记为不合格。
 
+运行结果审计：
+
+```powershell
+python quality_runtime_audit.py
+```
+
+该脚本使用 `quality_cases.json` 中的固定输入和预期输出，检查原题正确代码、
+同类题正确代码，并确认逻辑类同类题是否产生与正确代码不同的运行结果。
+
 ## V2 界面预览
 
 公开入口暂时仍是 `app.py`。新版界面在完成验收前通过以下命令本地预览：
